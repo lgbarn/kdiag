@@ -76,6 +76,9 @@ func runPodShell(cmd *cobra.Command, args []string) error {
 
 	// Warn if Fargate — ephemeral containers may not be supported
 	computeType := k8s.DetectComputeType(pod)
+	if IsVerbose() {
+		fmt.Fprintf(os.Stderr, "[kdiag] detected compute type: %s\n", computeType)
+	}
 	if computeType == k8s.ComputeTypeFargate {
 		fmt.Fprintf(os.Stderr, "warning: pod %q appears to be running on Fargate — ephemeral containers may not be supported\n", podName)
 	}
