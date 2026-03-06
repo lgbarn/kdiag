@@ -203,11 +203,35 @@ Requires RBAC: `pods/ephemeralcontainers` create.
 
 ### capture
 
-Start a tcpdump packet capture in an ephemeral container and stream output.
+Capture network traffic from a pod via an ephemeral debug container.
+
+By default, live output uses tshark with `-T ek` format (JSON-lines, one JSON
+object per packet) which is optimized for consumption by AI agents and log
+pipelines. Use `--format=text` for classic tcpdump output, or `--format=json`
+for a tshark JSON array. When `--write` is used, output is always raw pcap.
 
 ```sh
-kdiag capture <pod> [-n namespace] [--filter "port 80"] [--image nicolaka/netshoot]
+# AI-friendly JSON-lines (default)
+kdiag capture <pod> [-n namespace] [--filter "port 80"]
+
+# Classic tcpdump text
+kdiag capture <pod> --format text
+
+# Write pcap file
+kdiag capture <pod> -w /tmp/out.pcap
+
+# Stop after 100 packets or 30 seconds
+kdiag capture <pod> -c 100 -d 30s
 ```
+
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--filter` | `-f` | | BPF filter expression |
+| `--write` | `-w` | | Write raw pcap to file |
+| `--format` | | `ek` | Live output: `ek` (JSON-lines), `json`, `text` |
+| `--interface` | `-i` | `any` | Network interface to capture on |
+| `--count` | `-c` | `0` | Stop after N packets (0 = unlimited) |
+| `--duration` | `-d` | `0` | Stop after duration (0 = unlimited) |
 
 Requires RBAC: `pods/ephemeralcontainers` create.
 

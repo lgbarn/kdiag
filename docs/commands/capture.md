@@ -1,6 +1,6 @@
 # kdiag capture
 
-Capture network traffic from a pod using tcpdump, with optional BPF filtering and pcap file output.
+Capture network traffic from a pod via an ephemeral debug container.
 
 ## Synopsis
 
@@ -10,9 +10,9 @@ kdiag capture <pod-name> [flags]
 
 ## Description
 
-`kdiag capture` injects an ephemeral container running tcpdump into the target pod. Because the ephemeral container shares the pod's network namespace, tcpdump sees the same traffic the application sees.
+`kdiag capture` injects an ephemeral container into the target pod. Because the ephemeral container shares the pod's network namespace, the capture tool sees the same traffic the application sees.
 
-By default, output is streamed to stdout in human-readable tcpdump format. With `--write`, raw pcap data is written to a local file for analysis in Wireshark or tshark.
+By default, live output uses tshark with `-T ek` format (JSON-lines, one JSON object per packet) which is optimized for consumption by AI agents and log pipelines. Use `--format=text` for classic tcpdump output, or `--format=json` for a tshark JSON array. When `--write` is used, output is always raw pcap (openable with Wireshark).
 
 Capture runs until you press Ctrl-C, the `--count` packet limit is reached, or the `--duration` timeout expires.
 
@@ -20,8 +20,9 @@ Capture runs until you press Ctrl-C, the `--count` packet limit is reached, or t
 
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
-| `--filter` | `-f` | — | BPF filter expression passed to tcpdump |
+| `--filter` | `-f` | — | BPF filter expression passed to tcpdump/tshark |
 | `--write` | `-w` | — | Write raw pcap data to this local file path |
+| `--format` | | `ek` | Live output format: `ek` (JSON-lines), `json` (tshark JSON array), `text` (tcpdump text) |
 | `--interface` | `-i` | `any` | Network interface to capture on |
 | `--count` | `-c` | `0` (unlimited) | Stop after this many packets |
 | `--duration` | `-d` | `0` (unlimited) | Stop capture after this duration (e.g. `30s`, `2m`) |
@@ -32,10 +33,16 @@ Note: `--timeout` controls how long kdiag waits for the ephemeral container to *
 
 ## Examples
 
-**Stream all traffic from a pod:**
+**Stream all traffic (AI-friendly JSON-lines, default):**
 
 ```bash
 kdiag capture my-pod
+```
+
+**Classic tcpdump text output:**
+
+```bash
+kdiag capture my-pod --format text
 ```
 
 **Capture only HTTPS traffic:**
@@ -85,7 +92,7 @@ kdiag capture my-pod --interface eth0
 ```bash
 kdiag capture my-pod -f "port 80" -v
 # [verbose] pod: default/my-pod
-# [verbose] tcpdump command: [tcpdump -i any -l port 80]
+# [verbose] capture command: [tshark -i any -T ek -l -f port 80]
 # [verbose] ephemeral container name: kdiag-xk2mp
 ```
 
@@ -120,10 +127,10 @@ When the `--duration` limit is reached, kdiag exits cleanly with "Capture comple
 
 1. kdiag validates the `--write` output directory exists (before any Kubernetes work).
 2. RBAC is checked — requires `update pods/ephemeralcontainers` and `create pods/attach`.
-3. An ephemeral container running the tcpdump command is injected into the pod.
+3. An ephemeral container running the capture command (tshark or tcpdump) is injected into the pod.
 4. kdiag waits (up to `--timeout`) for the container to reach Running.
 5. kdiag attaches to the container's stdout/stderr streams:
-   - Without `--write`: tcpdump output streams to your terminal.
+   - Without `--write`: tshark/tcpdump output streams to your terminal.
    - With `--write`: raw pcap bytes stream to the local file.
 6. On exit, the ephemeral container is left for the kubelet to garbage-collect.
 
