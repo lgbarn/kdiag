@@ -9,8 +9,8 @@ import (
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 )
 
-// ENIDetail holds per-ENI information for a node.
-type ENIDetail struct {
+// ENISummary holds a summary of a single ENI attached to a node.
+type ENISummary struct {
 	ENIID          string   `json:"eni_id"`
 	DeviceIndex    int32    `json:"device_index"`
 	Description    string   `json:"description"`
@@ -20,15 +20,16 @@ type ENIDetail struct {
 
 // NodeENIInfo holds all ENI information for a node instance.
 type NodeENIInfo struct {
-	InstanceID string      `json:"instance_id"`
-	ENIs       []ENIDetail `json:"enis"`
-	TotalIPs   int         `json:"total_ips"`
+	InstanceID string       `json:"instance_id"`
+	ENIs       []ENISummary `json:"enis"`
+	TotalIPs   int          `json:"total_ips"`
 }
 
-// InstanceTypeLimits holds the ENI and IP limits for an EC2 instance type.
-type InstanceTypeLimits struct {
-	MaxENIs      int32 `json:"max_enis"`
-	MaxIPsPerENI int32 `json:"max_ips_per_eni"`
+// InstanceLimits holds the ENI and IP limits for an EC2 instance type.
+type InstanceLimits struct {
+	InstanceType string `json:"instance_type"`
+	MaxENIs      int32  `json:"max_enis"`
+	MaxIPsPerENI int32  `json:"max_ips_per_eni"`
 }
 
 // ListNodeENIs returns all ENIs attached to the given EC2 instance.
@@ -44,7 +45,7 @@ func ListNodeENIs(ctx context.Context, api EC2API, instanceID string) (*NodeENII
 
 	info := &NodeENIInfo{
 		InstanceID: instanceID,
-		ENIs:       make([]ENIDetail, 0, len(out.NetworkInterfaces)),
+		ENIs:       make([]ENISummary, 0, len(out.NetworkInterfaces)),
 	}
 
 	for _, eni := range out.NetworkInterfaces {
@@ -61,7 +62,7 @@ func ListNodeENIs(ctx context.Context, api EC2API, instanceID string) (*NodeENII
 		ipCount := len(eni.PrivateIpAddresses)
 		info.TotalIPs += ipCount
 
-		info.ENIs = append(info.ENIs, ENIDetail{
+		info.ENIs = append(info.ENIs, ENISummary{
 			ENIID:          aws.ToString(eni.NetworkInterfaceId),
 			DeviceIndex:    deviceIndex,
 			Description:    aws.ToString(eni.Description),
@@ -75,8 +76,8 @@ func ListNodeENIs(ctx context.Context, api EC2API, instanceID string) (*NodeENII
 
 // GetInstanceTypeLimits returns the ENI and IP-per-ENI limits for the given
 // EC2 instance types.
-func GetInstanceTypeLimits(ctx context.Context, api EC2API, instanceTypes []string) (map[string]*InstanceTypeLimits, error) {
-	result := make(map[string]*InstanceTypeLimits)
+func GetInstanceTypeLimits(ctx context.Context, api EC2API, instanceTypes []string) (map[string]*InstanceLimits, error) {
+	result := make(map[string]*InstanceLimits)
 	if len(instanceTypes) == 0 {
 		return result, nil
 	}
@@ -97,7 +98,9 @@ func GetInstanceTypeLimits(ctx context.Context, api EC2API, instanceTypes []stri
 		if info.NetworkInfo == nil {
 			continue
 		}
-		limits := &InstanceTypeLimits{}
+		limits := &InstanceLimits{
+			InstanceType: string(info.InstanceType),
+		}
 		if info.NetworkInfo.MaximumNetworkInterfaces != nil {
 			limits.MaxENIs = *info.NetworkInfo.MaximumNetworkInterfaces
 		}
