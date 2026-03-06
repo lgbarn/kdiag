@@ -10,7 +10,7 @@ import (
 
 func main() {
 	if err := cmd.Execute(); err != nil {
-		if !errors.Is(err, cmd.ErrHealthCritical) {
+		if !errors.Is(err, cmd.ErrHealthCritical) && !errors.Is(err, cmd.ErrDiagnoseFail) {
 			fmt.Fprintln(os.Stderr, err)
 		}
 		os.Exit(1)
