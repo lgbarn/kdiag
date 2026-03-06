@@ -10,9 +10,15 @@ kdiag/
 ├── cmd/
 │   ├── root.go           # Root command, global flags, flag accessors
 │   ├── shell.go          # shell subcommand
-│   └── capture.go        # capture subcommand
+│   ├── capture.go        # capture subcommand
+│   ├── dns.go            # dns subcommand
+│   ├── connectivity.go   # connectivity subcommand
+│   ├── trace.go          # trace subcommand
+│   └── netpol.go         # netpol subcommand
 └── pkg/
     ├── k8s/              # Kubernetes client, ephemeral containers, exec, RBAC, compute
+    ├── dns/              # FQDN building, dig output parsing, CoreDNS pod evaluation
+    ├── netpol/           # NetworkPolicy matching and rule summarization
     └── output/           # Table and JSON output formatting
 ```
 
@@ -37,6 +43,16 @@ Commands follow the same orchestration pattern:
 5. Attach to stdin/stdout/stderr
 
 Both commands use a two-context strategy: a timeout context (`context.WithTimeout`) for the create and wait phases, and a background context (no timeout) for the attach phase so the user controls session length.
+
+### dns.go, connectivity.go, trace.go, netpol.go
+
+The Phase 2 network diagnostic commands use a different execution model depending on whether they need live data from inside a pod:
+
+**Exec-based commands** (`dns`, `connectivity`): build a `k8s.Client`, resolve target resources, call `k8s.RunInEphemeralContainer` which runs RBAC pre-flight, creates an ephemeral container, waits for Running, then execs a command (`dig` or `curl`/`nc`) and captures stdout/stderr to `bytes.Buffer`. The ephemeral container exits when the command completes.
+
+**Read-only commands** (`trace`, `netpol`): build a `k8s.Client`, fetch pods/services/EndpointSlices/NetworkPolicies via the Kubernetes API, compute results in-process using `pkg/dns` or `pkg/netpol` helpers, then print. No ephemeral containers or exec calls are made.
+
+All four commands support `--output json` via the `pkg/output` printer abstraction.
 
 ## pkg/k8s — Kubernetes Package
 
@@ -91,7 +107,9 @@ This detection informs command behavior:
 
 - `shell` uses `AttachToContainer` (connects to the container's existing process)
 - `capture` uses `AttachToContainer` (tcpdump is already running as the container entrypoint)
-- Future commands (`dns`, `connectivity`) will use `ExecInContainer` for ad-hoc commands
+- `dns` and `connectivity` use `ExecInContainer` via `RunInEphemeralContainer` for ad-hoc diagnostic commands
+
+`RunInEphemeralContainer` is a higher-level helper (added in Phase 2) that combines RBAC pre-flight, ephemeral container creation, wait-for-running, and exec into a single call. Commands pass an `EphemeralExecOpts` struct specifying pod, namespace, image, command, and stdout/stderr writers.
 
 Both functions build a WebSocket executor with SPDY fallback via `remotecommand.NewFallbackExecutor`. WebSocket is tried first (preferred in Kubernetes 1.29+); on upgrade failure the library falls back to SPDY automatically, ensuring compatibility with older clusters.
 
@@ -113,6 +131,28 @@ When `AttachToContainer` is called with `TTY=true`, stderr is not requested from
 The pod is labeled `app.kubernetes.io/managed-by: kdiag` for easy identification.
 
 `DeleteNodeDebugPod` is called via `defer` in the node shell command, ensuring cleanup even when the session ends abnormally. A warning is printed to stderr if deletion fails (so the operator knows to clean up manually).
+
+## pkg/dns — DNS Package
+
+Stateless utilities for DNS diagnostics. No Kubernetes client dependency — all functions take plain Go types.
+
+**`BuildFQDN(name, namespace string) string`** — appends `.namespace.svc.cluster.local` to bare names; returns dotted names unchanged.
+
+**`BuildDigCommand(target, dnsServerIP string) []string`** — returns the `dig` argv slice. When `dnsServerIP` is non-empty, the server is included as `@ip`. Always appends `+noall +answer +stats` to produce parseable output.
+
+**`ParseDigOutput(raw string) (resolved []string, queryTimeMs int64, err error)`** — parses the stdout of the dig invocation above. Extracts A/AAAA answer IPs and query time. Returns an error for empty output or non-NOERROR status (NXDOMAIN, SERVFAIL, etc.). NOERROR with an empty answer section is valid and returns `(nil, queryTimeMs, nil)`.
+
+**`EvaluateCoreDNSPods(pods []corev1.Pod) []CoreDNSPod`** — converts a pod list to `CoreDNSPod` summaries. A pod is `Ready=true` only when every container in `ContainerStatuses` is ready.
+
+## pkg/netpol — NetworkPolicy Package
+
+Stateless utilities for NetworkPolicy analysis. Takes Kubernetes API types as input; produces human-readable summary types as output.
+
+**`MatchingPolicies(policies []networkingv1.NetworkPolicy, podLabels map[string]string) ([]networkingv1.NetworkPolicy, error)`** — filters the policy list to those whose `podSelector` matches the given pod labels. Uses `metav1.LabelSelectorAsSelector` and `labels.Set.Matches`, the same mechanism Kubernetes uses for enforcement. An empty selector (`{}`) matches all pods.
+
+**`SummarizePolicy(policy networkingv1.NetworkPolicy) PolicySummary`** — converts a NetworkPolicy into a `PolicySummary` with human-readable port strings (`TCP/80`, `UDP/53`), peer descriptions (`pods: app=frontend`, `namespaces: env=prod`, `ipBlock: 10.0.0.0/8 except [10.1.0.0/16]`), and fallback strings (`<all sources>`, `<all ports>`, `<all destinations>`) when rule fields are nil or empty.
+
+**`FormatSelector(sel *metav1.LabelSelector) string`** — renders a label selector as `key=value,...`. Returns `<all>` for nil; `<all pods>` for an empty (match-all) selector. Keys are sorted for deterministic output.
 
 ## pkg/output — Output Package
 
@@ -200,6 +240,88 @@ cmd/shell.go (runNodeShell)
   ├─ k8s.WaitForPodRunning()
   │
   └─ k8s.AttachToContainer()           ← attach to "debugger" container
+```
+
+### kdiag dns \<pod-or-service\>
+
+```
+cmd/dns.go
+  │
+  ├─ k8s.NewClient(ConfigFlags)
+  │
+  ├─ Services.Get() OR Pods.Get()  ← resolve target type
+  │    └─ dns.BuildFQDN(name, namespace)
+  │
+  ├─ Pods.List(k8s-app=kube-dns)  ← CoreDNS pod health
+  │    └─ dns.EvaluateCoreDNSPods()
+  │
+  ├─ Services.Get("kube-dns")     ← CoreDNS ClusterIP
+  │
+  └─ k8s.RunInEphemeralContainer()  ← RBAC + create + wait + exec
+       └─ dns.BuildDigCommand(fqdn, coreDNSIP)
+       └─ dns.ParseDigOutput(stdout)
+       └─ print DNSResult as table or JSON
+```
+
+### kdiag connectivity \<source-pod\> \<destination\>
+
+```
+cmd/connectivity.go
+  │
+  ├─ k8s.NewClient(ConfigFlags)
+  │
+  ├─ Pods.Get(srcPod)             ← validate source pod is Running
+  │
+  ├─ resolve destination:
+  │    ├─ host:port   → use directly
+  │    ├─ Service     → ClusterIP + port (auto-detect protocol from port name/number)
+  │    └─ Pod         → PodIP + --port (required)
+  │
+  ├─ build probe command:
+  │    ├─ http → curl -sS --connect-timeout 5 -o /dev/null -w "%{http_code} %{time_total}"
+  │    └─ tcp  → nc -zv -w 5 <host> <port>
+  │
+  └─ k8s.RunInEphemeralContainer()  ← RBAC + create + wait + exec
+       └─ parseHTTPResult() or check exec error (TCP)
+       └─ print ConnectivityResult as table or JSON
+```
+
+### kdiag trace \<source-pod\> \<destination-service\>
+
+```
+cmd/trace.go  (read-only, no ephemeral containers)
+  │
+  ├─ k8s.NewClient(ConfigFlags)
+  │
+  ├─ Pods.Get(srcPod)              ← PodIP, NodeName
+  │
+  ├─ Services.Get(dstService)      ← ClusterIP
+  │
+  ├─ DiscoveryV1.EndpointSlices.List(LabelServiceName=dstService)
+  │    └─ collect ready endpoints (name, IP, NodeName)
+  │
+  ├─ Nodes.Get() for each unique node  ← AZ labels (best-effort)
+  │
+  └─ print TraceResult{Source, Service, Endpoints} as table or JSON
+```
+
+### kdiag netpol \<pod\>
+
+```
+cmd/netpol.go  (read-only, no ephemeral containers)
+  │
+  ├─ k8s.NewClient(ConfigFlags)
+  │
+  ├─ Pods.Get(podName)             ← pod labels
+  │
+  ├─ NetworkingV1.NetworkPolicies.List()
+  │
+  ├─ netpol.MatchingPolicies(policies, pod.Labels)
+  │    └─ LabelSelectorAsSelector + labels.Set.Matches per policy
+  │
+  ├─ netpol.SummarizePolicy() for each match
+  │
+  └─ print NetpolResult as structured text or JSON
 ```
 
 ## Dependencies

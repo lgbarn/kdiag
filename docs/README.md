@@ -2,15 +2,17 @@
 
 A Kubernetes diagnostic CLI for EKS clusters. Drop into a debug shell, capture packets, and diagnose network issues without juggling kubectl, ksniff, and netshoot separately.
 
-## What's in Phase 1
+## Available Commands
 
 | Command | What it does |
 |---------|-------------|
 | `kdiag shell <pod>` | Interactive debug shell inside a pod via ephemeral container |
 | `kdiag shell --node <node>` | Privileged debug shell on an EC2 node |
 | `kdiag capture <pod>` | Live tcpdump output from a pod; save to .pcap for Wireshark |
-
-> Phase 1 implements shell and capture. DNS, connectivity, trace, logs, EKS-specific diagnostics, and the `diagnose` meta-command are planned for later phases.
+| `kdiag dns <pod-or-service>` | Test DNS resolution from inside a pod; check CoreDNS health |
+| `kdiag connectivity <pod> <dest>` | Test TCP or HTTP connectivity from a pod to a service, pod, or host:port |
+| `kdiag trace <pod> <service>` | Map the network path from a pod through a service to its endpoints |
+| `kdiag netpol <pod>` | List NetworkPolicies that apply to a pod and summarize their rules |
 
 ## Prerequisites
 
@@ -65,6 +67,35 @@ kdiag capture my-pod --filter "port 443"
 
 ```bash
 kdiag capture my-pod -w /tmp/trace.pcap --duration 30s
+```
+
+**Test DNS resolution from inside a pod:**
+
+```bash
+kdiag dns my-service
+kdiag dns my-pod -n production
+```
+
+**Test TCP or HTTP connectivity between pods:**
+
+```bash
+kdiag connectivity my-pod my-service
+kdiag connectivity my-pod other-pod --port 8080
+kdiag connectivity my-pod 10.0.1.42:5432
+```
+
+**Map the network path to a service:**
+
+```bash
+kdiag trace my-pod my-service
+kdiag trace my-pod my-service -o json
+```
+
+**Inspect NetworkPolicies for a pod:**
+
+```bash
+kdiag netpol my-pod
+kdiag netpol my-pod -n production
 ```
 
 ## Global Flags
@@ -133,3 +164,7 @@ kdiag detects whether a pod is running on Fargate by checking the `eks.amazonaws
 
 - [shell](commands/shell.md) — debug shell into pods and nodes
 - [capture](commands/capture.md) — packet capture via tcpdump
+- [dns](commands/dns.md) — DNS resolution and CoreDNS health check
+- [connectivity](commands/connectivity.md) — TCP/HTTP connectivity testing between pods
+- [trace](commands/trace.md) — network path mapping from pod to service endpoints
+- [netpol](commands/netpol.md) — NetworkPolicy inspection for a pod
