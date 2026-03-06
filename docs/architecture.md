@@ -6,17 +6,21 @@ kdiag is a Go CLI built on Cobra. The codebase is divided into command implement
 
 ```
 kdiag/
-├── main.go               # Entry point — calls cmd.Execute()
+├── main.go               # Entry point — calls cmd.Execute(); handles ErrHealthCritical sentinel
 ├── cmd/
 │   ├── root.go           # Root command, global flags, flag accessors
+│   ├── util.go           # Shared helpers: derefReplicas, eventAge, boolStr
 │   ├── shell.go          # shell subcommand
 │   ├── capture.go        # capture subcommand
 │   ├── dns.go            # dns subcommand
 │   ├── connectivity.go   # connectivity subcommand
 │   ├── trace.go          # trace subcommand
-│   └── netpol.go         # netpol subcommand
+│   ├── netpol.go         # netpol subcommand
+│   ├── logs.go           # logs subcommand
+│   ├── inspect.go        # inspect subcommand
+│   └── health.go         # health subcommand; defines shared EventSummary type
 └── pkg/
-    ├── k8s/              # Kubernetes client, ephemeral containers, exec, RBAC, compute
+    ├── k8s/              # Kubernetes client, ephemeral containers, exec, RBAC, compute, watch
     ├── dns/              # FQDN building, dig output parsing, CoreDNS pod evaluation
     ├── netpol/           # NetworkPolicy matching and rule summarization
     └── output/           # Table and JSON output formatting
@@ -44,6 +48,14 @@ Commands follow the same orchestration pattern:
 
 Both commands use a two-context strategy: a timeout context (`context.WithTimeout`) for the create and wait phases, and a background context (no timeout) for the attach phase so the user controls session length.
 
+### util.go
+
+Shared package-level helpers used by multiple commands in the `cmd` package:
+
+- **`derefReplicas(p *int32) int32`** — safely dereferences a replica count pointer, returning 1 if nil. Used by `inspect` and `health` when reading `Spec.Replicas`.
+- **`eventAge(lastTimestamp metav1.Time, eventTime metav1.MicroTime) string`** — computes a human-readable age string from an event's timestamps. Falls back from `LastTimestamp` to `EventTime` to `"unknown"`.
+- **`boolStr(b bool) string`** — converts a bool to `"true"` or `"false"` for table output.
+
 ### dns.go, connectivity.go, trace.go, netpol.go
 
 The Phase 2 network diagnostic commands use a different execution model depending on whether they need live data from inside a pod:
@@ -53,6 +65,18 @@ The Phase 2 network diagnostic commands use a different execution model dependin
 **Read-only commands** (`trace`, `netpol`): build a `k8s.Client`, fetch pods/services/EndpointSlices/NetworkPolicies via the Kubernetes API, compute results in-process using `pkg/dns` or `pkg/netpol` helpers, then print. No ephemeral containers or exec calls are made.
 
 All four commands support `--output json` via the `pkg/output` printer abstraction.
+
+### logs.go, inspect.go, health.go
+
+The Phase 3 observability commands are read-only (no ephemeral containers) and follow different execution models:
+
+**`logs`** — calls `k8s.ListPodsBySelector` to find matching pods, then spawns one goroutine per pod that calls `k8s.StreamPodLogs`. A `prefixWriter` (defined in `logs.go`) wraps each pod's goroutine output: it prepends a colored `[pod-name]` prefix in text mode or emits JSON-L records in `--output json` mode. A mutex inside `prefixWriter` serializes concurrent writes to `color.Output`. SIGINT/SIGTERM cancels the shared context, which closes all log streams.
+
+**`inspect`** — accepts a `type/name` argument, fetches the resource via the appropriate API group, traverses `ownerReferences` (for pods, up to two hops: Pod → ReplicaSet → Deployment), collects conditions, container statuses, replica counts, and events from `k8s.ListEvents`. Renders four tabular sections or a single `InspectResult` JSON struct.
+
+**`health`** — makes six cluster-wide list calls (nodes, pods, deployments, daemonsets, statefulsets, warning events) with an empty namespace string to span all namespaces. Each resource category is evaluated by a pure function (`evaluateNode`, `evaluatePod`, `evaluateDeployment`, `evaluateDaemonSet`, `evaluateStatefulSet`) that returns a summary and a boolean indicating whether the condition is critical. The `ErrHealthCritical` sentinel is returned when any critical condition is found; `main.go` detects it to suppress error printing while still exiting with code 1.
+
+**Shared type — `EventSummary`**: defined in `health.go` and used by `inspect.go`. Both files are in the same `cmd` package. `summarizeEvents` (in `inspect.go`) populates it from raw `corev1.Event` values using `eventAge` from `util.go`.
 
 ## pkg/k8s — Kubernetes Package
 
@@ -118,6 +142,16 @@ When `TTY=true`:
 - A `terminalSizeQueue` goroutine listens for `SIGWINCH` and forwards terminal dimensions to the remote container, so window resize works during interactive sessions
 
 When `AttachToContainer` is called with `TTY=true`, stderr is not requested from the server — Kubernetes merges stderr into stdout when a TTY is allocated, which is standard terminal behavior.
+
+### watch.go
+
+Kubernetes list and streaming helpers used by the Phase 3 observability commands:
+
+**`ListPodsBySelector(ctx, client, namespace, labelSelector string) ([]corev1.Pod, error)`** — lists pods in the given namespace filtered by a label selector string. Passes the selector directly to the server-side list API; no client-side filtering is performed.
+
+**`ListEvents(ctx, client, namespace, kind, name string) ([]corev1.Event, error)`** — lists events in namespace filtered by `involvedObject.name` and `involvedObject.namespace`. When `kind` is non-empty, `involvedObject.kind` is added to the field selector. Field selector filtering is handled server-side.
+
+**`StreamPodLogs(ctx, client, namespace, podName, containerName string, w io.Writer) error`** — opens a following log stream with `Timestamps: true`. Uses a `bufio.Scanner` with a 1MB buffer to handle long log lines without truncation. Blocks until the stream closes or `ctx` is cancelled.
 
 ### nodedbg.go
 
@@ -334,3 +368,4 @@ cmd/netpol.go  (read-only, no ephemeral containers)
 | `k8s.io/api` | v0.32.3 | Kubernetes API types |
 | `k8s.io/apimachinery` | v0.32.3 | Kubernetes API machinery |
 | `golang.org/x/term` | v0.25.0 | Raw terminal mode and resize |
+| `github.com/fatih/color` | v1.18.0 | ANSI color output for `kdiag logs` pod prefixes |

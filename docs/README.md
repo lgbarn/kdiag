@@ -13,6 +13,9 @@ A Kubernetes diagnostic CLI for EKS clusters. Drop into a debug shell, capture p
 | `kdiag connectivity <pod> <dest>` | Test TCP or HTTP connectivity from a pod to a service, pod, or host:port |
 | `kdiag trace <pod> <service>` | Map the network path from a pod through a service to its endpoints |
 | `kdiag netpol <pod>` | List NetworkPolicies that apply to a pod and summarize their rules |
+| `kdiag logs -l <selector>` | Tail logs from pods matching a label selector with color-coded output |
+| `kdiag inspect <type/name>` | Show ownership chain, conditions, container status, and events for a resource |
+| `kdiag health` | Cluster-wide health report across nodes, pods, controllers, and events |
 
 ## Prerequisites
 
@@ -98,6 +101,30 @@ kdiag netpol my-pod
 kdiag netpol my-pod -n production
 ```
 
+**Tail logs from pods matching a label selector:**
+
+```bash
+kdiag logs -l app=myapp
+kdiag logs -l app=myapp --filter error --max-pods 5
+kdiag logs -l app=myapp -o json
+```
+
+**Inspect a resource — ownership chain, conditions, events:**
+
+```bash
+kdiag inspect pod/myapp-6d9f4b-xkp2j
+kdiag inspect deployment/myapp -n production
+kdiag inspect deployment/myapp -o json
+```
+
+**Cluster-wide health check (exits 1 on critical issues):**
+
+```bash
+kdiag health
+kdiag health -o json
+kdiag health || alert "cluster degraded"
+```
+
 ## Global Flags
 
 These flags apply to every command.
@@ -168,3 +195,6 @@ kdiag detects whether a pod is running on Fargate by checking the `eks.amazonaws
 - [connectivity](commands/connectivity.md) — TCP/HTTP connectivity testing between pods
 - [trace](commands/trace.md) — network path mapping from pod to service endpoints
 - [netpol](commands/netpol.md) — NetworkPolicy inspection for a pod
+- [logs](commands/logs.md) — multi-pod log tailing with color-coded output
+- [inspect](commands/inspect.md) — enriched resource details: ownership chain, conditions, events
+- [health](commands/health.md) — cluster-wide health report with CI-compatible exit codes
