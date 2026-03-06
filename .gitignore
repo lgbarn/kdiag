@@ -11,3 +11,6 @@ kdiag
 
 # Coverage
 coverage.out
+
+# Shipyard
+.shipyard/
