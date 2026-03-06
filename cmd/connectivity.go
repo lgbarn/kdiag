@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -70,12 +71,15 @@ func runConnectivity(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "[kdiag] resolving source pod %q in namespace %q\n", srcPod, namespace)
 	}
 
-	_, err = client.Clientset.CoreV1().Pods(namespace).Get(ctx, srcPod, metav1.GetOptions{})
+	srcPodObj, err := client.Clientset.CoreV1().Pods(namespace).Get(ctx, srcPod, metav1.GetOptions{})
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			return fmt.Errorf("error: source pod %q not found in namespace %q", srcPod, namespace)
 		}
 		return fmt.Errorf("error getting source pod %q: %w", srcPod, err)
+	}
+	if srcPodObj.Status.Phase != corev1.PodRunning {
+		return fmt.Errorf("error: source pod %q is not Running (phase: %s)", srcPod, srcPodObj.Status.Phase)
 	}
 
 	// Resolve destination into host + port + protocol.
@@ -160,7 +164,11 @@ func runConnectivity(cmd *cobra.Command, args []string) error {
 	var connectCmd []string
 	switch protocol {
 	case "http":
-		url := "http://" + dstHost + ":" + dstPort + "/"
+		scheme := "http"
+		if dstPort == "443" {
+			scheme = "https"
+		}
+		url := scheme + "://" + dstHost + ":" + dstPort + "/"
 		connectCmd = []string{
 			"curl", "-sS", "--connect-timeout", "5",
 			"-o", "/dev/null",
@@ -176,12 +184,12 @@ func runConnectivity(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "[kdiag] creating ephemeral container in pod %s/%s\n", namespace, srcPod)
 	}
 
-	// Create ephemeral container (no entrypoint command — exec the test command separately).
+	// Create ephemeral container with sleep so it stays alive for exec.
 	containerName, err := k8s.CreateEphemeralContainer(ctx, client, k8s.EphemeralContainerOpts{
 		PodName:         srcPod,
 		Namespace:       namespace,
 		Image:           GetDebugImage(),
-		Command:         nil,
+		Command:         []string{"sleep", "infinity"},
 		Stdin:           false,
 		TTY:             false,
 		ImagePullSecret: GetImagePullSecret(),
@@ -226,7 +234,11 @@ func runConnectivity(cmd *cobra.Command, args []string) error {
 
 	switch protocol {
 	case "http":
-		result, _ = parseHTTPResult(result, stdout.String(), elapsed)
+		var parseErr error
+		result, parseErr = parseHTTPResult(result, stdout.String(), elapsed)
+		if parseErr != nil {
+			return fmt.Errorf("error parsing HTTP result: %w", parseErr)
+		}
 	default:
 		if execErr == nil {
 			result.Success = true

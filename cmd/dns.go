@@ -89,6 +89,9 @@ func runDNS(cmd *cobra.Command, args []string) error {
 			}
 			return fmt.Errorf("error getting pod %q: %w", target, podErr)
 		}
+		if pod.Status.Phase != corev1.PodRunning {
+			return fmt.Errorf("error: pod %q is not Running (phase: %s)", target, pod.Status.Phase)
+		}
 		fqdn = dns.BuildFQDN(pod.Name, namespace)
 		podName = pod.Name
 		if IsVerbose() {
@@ -143,7 +146,7 @@ func runDNS(cmd *cobra.Command, args []string) error {
 		PodName:         podName,
 		Namespace:       namespace,
 		Image:           GetDebugImage(),
-		Command:         nil,
+		Command:         []string{"sleep", "infinity"},
 		Stdin:           false,
 		TTY:             false,
 		ImagePullSecret: GetImagePullSecret(),

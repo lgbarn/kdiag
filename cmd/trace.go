@@ -102,9 +102,11 @@ func runTrace(cmd *cobra.Command, args []string) error {
 	}
 
 	// Collect endpoints and unique node names.
-	var endpoints []TraceHop
+	endpoints := make([]TraceHop, 0)
 	nodeNames := map[string]struct{}{}
-	nodeNames[srcNode] = struct{}{}
+	if srcNode != "" {
+		nodeNames[srcNode] = struct{}{}
+	}
 
 	for _, es := range esList.Items {
 		for _, ep := range es.Endpoints {
@@ -191,7 +193,7 @@ func runTrace(cmd *cobra.Command, args []string) error {
 	// Output.
 	printer, err := output.NewPrinter(GetOutputFormat(), os.Stdout)
 	if err != nil {
-		return fmt.Errorf("error: unsupported output format: %w", err)
+		return fmt.Errorf("unsupported output format: %w", err)
 	}
 
 	if jp, ok := printer.(*output.JSONPrinter); ok {

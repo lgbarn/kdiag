@@ -69,7 +69,7 @@ func runNetpol(cmd *cobra.Command, args []string) error {
 	// Match policies against pod labels.
 	matched, err := netpol.MatchingPolicies(policyList.Items, pod.Labels)
 	if err != nil {
-		return fmt.Errorf("error: matching NetworkPolicies: %w", err)
+		return fmt.Errorf("matching NetworkPolicies: %w", err)
 	}
 
 	// Summarize matched policies.
@@ -92,7 +92,7 @@ func runNetpol(cmd *cobra.Command, args []string) error {
 	// Output.
 	printer, err := output.NewPrinter(GetOutputFormat(), os.Stdout)
 	if err != nil {
-		return fmt.Errorf("error: unsupported output format: %w", err)
+		return fmt.Errorf("unsupported output format: %w", err)
 	}
 
 	if jp, ok := printer.(*output.JSONPrinter); ok {
@@ -134,5 +134,5 @@ func runNetpol(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	return nil
+	return printer.Flush()
 }

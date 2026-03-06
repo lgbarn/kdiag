@@ -18,9 +18,9 @@ type RBACCheck struct {
 	Allowed     bool
 }
 
-// CheckEphemeralContainerRBAC performs two SelfSubjectAccessReview calls to
+// CheckEphemeralContainerRBAC performs three SelfSubjectAccessReview calls to
 // verify that the current user has the permissions required to inject ephemeral
-// containers and attach to them in the given namespace.
+// containers, attach to them, and exec into them in the given namespace.
 func CheckEphemeralContainerRBAC(ctx context.Context, client kubernetes.Interface, namespace string) ([]RBACCheck, error) {
 	type request struct {
 		verb        string
@@ -31,6 +31,7 @@ func CheckEphemeralContainerRBAC(ctx context.Context, client kubernetes.Interfac
 	requests := []request{
 		{verb: "update", resource: "pods", subresource: "ephemeralcontainers"},
 		{verb: "create", resource: "pods", subresource: "attach"},
+		{verb: "create", resource: "pods", subresource: "exec"},
 	}
 
 	results := make([]RBACCheck, 0, len(requests))
@@ -109,6 +110,7 @@ func FormatRBACError(checks []RBACCheck) string {
 	b.WriteString("\nremediation: to grant ephemeral container permissions, ask your cluster admin to add these rules:\n")
 	b.WriteString("  - verbs: [\"update\"], resources: [\"pods/ephemeralcontainers\"]\n")
 	b.WriteString("  - verbs: [\"create\"], resources: [\"pods/attach\"]\n")
+	b.WriteString("  - verbs: [\"create\"], resources: [\"pods/exec\"]\n")
 
 	return b.String()
 }

@@ -40,14 +40,15 @@ func TestCheckEphemeralContainerRBAC_BothAllowed(t *testing.T) {
 	fakeClient.PrependReactor("create", "selfsubjectaccessreviews", makeReactor(map[string]bool{
 		"update/ephemeralcontainers": true,
 		"create/attach":              true,
+		"create/exec":                true,
 	}))
 
 	checks, err := CheckEphemeralContainerRBAC(context.Background(), fakeClient, "default")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(checks) != 2 {
-		t.Fatalf("expected 2 checks, got %d", len(checks))
+	if len(checks) != 3 {
+		t.Fatalf("expected 3 checks, got %d", len(checks))
 	}
 	for _, c := range checks {
 		if !c.Allowed {
@@ -61,6 +62,7 @@ func TestCheckEphemeralContainerRBAC_EphemeralContainersDenied(t *testing.T) {
 	fakeClient.PrependReactor("create", "selfsubjectaccessreviews", makeReactor(map[string]bool{
 		"update/ephemeralcontainers": false,
 		"create/attach":              true,
+		"create/exec":                true,
 	}))
 
 	checks, err := CheckEphemeralContainerRBAC(context.Background(), fakeClient, "default")
@@ -86,6 +88,7 @@ func TestFormatRBACError_IncludesDeniedAndRemediation(t *testing.T) {
 	checks := []RBACCheck{
 		{Verb: "update", Resource: "pods", Subresource: "ephemeralcontainers", Allowed: false},
 		{Verb: "create", Resource: "pods", Subresource: "attach", Allowed: true},
+		{Verb: "create", Resource: "pods", Subresource: "exec", Allowed: false},
 	}
 
 	msg := FormatRBACError(checks)
@@ -96,7 +99,13 @@ func TestFormatRBACError_IncludesDeniedAndRemediation(t *testing.T) {
 	if !strings.Contains(msg, "ephemeralcontainers") {
 		t.Error("expected FormatRBACError to mention denied subresource 'ephemeralcontainers'")
 	}
+	if !strings.Contains(msg, "exec") {
+		t.Error("expected FormatRBACError to mention denied subresource 'exec'")
+	}
 	if !strings.Contains(msg, "remediation") || !strings.Contains(msg, "cluster admin") {
 		t.Error("expected FormatRBACError to include remediation message referencing cluster admin")
+	}
+	if !strings.Contains(msg, "pods/exec") {
+		t.Error("expected FormatRBACError remediation to include pods/exec rule")
 	}
 }
