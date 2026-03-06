@@ -5,6 +5,8 @@ import (
 
 	"github.com/spf13/cobra"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
+
+	"github.com/lgbarn/kdiag/cmd/eks"
 )
 
 var (
@@ -48,6 +50,8 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&imagePullSecret, "image-pull-secret", "", "Image pull secret for private registry debug images")
 	rootCmd.PersistentFlags().DurationVar(&timeout, "timeout", 30*time.Second, "Timeout for operations (e.g. 30s, 2m)")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose/debug logging")
+
+	eks.Init(rootCmd, ConfigFlags, &outputFormat, &timeout, &verbose)
 }
 
 // Execute runs the root command. Returns any error.
