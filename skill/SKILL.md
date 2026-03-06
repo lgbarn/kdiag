@@ -61,6 +61,8 @@ A bare name always defaults to pod.
 | `kdiag eks cni` | EKS VPC CNI health | `kdiag eks cni` |
 | `kdiag eks sg <pod>` | Security groups for a pod | `kdiag eks sg my-pod` |
 | `kdiag eks node` | Node ENI/IP capacity | `kdiag eks node` |
+| `kdiag eks node --show-pods` | Pods per node (daemonset vs workload) | `kdiag eks node --show-pods` |
+| `kdiag eks node --show-pods --status EXHAUSTED` | Pods only on exhausted nodes | `kdiag eks node --show-pods --status EXHAUSTED` |
 
 ## Troubleshooting Playbooks
 
@@ -119,6 +121,10 @@ These commands require the cluster to be EKS and valid AWS credentials:
 3. **Node capacity**: `kdiag eks node`
    - Shows ENI and IP utilization per node
    - Flags nodes at >85% IP utilization
+4. **What's consuming IPs on exhausted nodes**: `kdiag eks node --show-pods --status EXHAUSTED`
+   - Lists every pod on exhausted nodes, separated into daemonset vs workload
+   - Shows namespace breakdown so you can spot which namespaces dominate
+   - Key insight: if all pods are daemonsets and zero are workloads, the node type is too small
 
 Use `--aws-profile` and `--aws-region` flags if the default AWS credentials don't match the cluster.
 

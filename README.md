@@ -112,6 +112,8 @@ Summary: 5 total, 4 pass, 1 warn, 0 fail, 0 error, 0 skipped
 | `kdiag eks cni` | VPC CNI DaemonSet health + per-node IP exhaustion |
 | `kdiag eks sg <pod>` | Security groups attached to a pod's ENI |
 | `kdiag eks node` | Node metadata: instance type, AZ, ENI/IP capacity |
+| `kdiag eks node --show-pods` | Same + list pods per node (daemonset vs workload breakdown) |
+| `kdiag eks node --show-pods --status EXHAUSTED` | Only show pods on exhausted nodes |
 
 All commands accept bare pod names (`my-pod`) or type/name format (`pod/my-pod`) — both work everywhere.
 

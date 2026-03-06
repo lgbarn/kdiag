@@ -4,9 +4,12 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/spf13/cobra"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	awspkg "github.com/lgbarn/kdiag/pkg/aws"
@@ -34,6 +37,31 @@ type NodeENIStatus struct {
 	Utilization  string `json:"utilization_pct"`
 	Status       string `json:"status"`
 	Note         string `json:"note,omitempty"`
+	Pods         *NodePodSummary `json:"pods,omitempty"`
+}
+
+// NodePodSummary holds pod details for a node when --show-pods is used.
+type NodePodSummary struct {
+	TotalPods    int                    `json:"total_pods"`
+	DaemonSets   int                    `json:"daemonset_pods"`
+	Workloads    int                    `json:"workload_pods"`
+	ByNamespace  []NamespacePodCount    `json:"by_namespace"`
+	DaemonSetPods []PodInfo             `json:"daemonset_pod_list,omitempty"`
+	WorkloadPods  []PodInfo             `json:"workload_pod_list,omitempty"`
+}
+
+// NamespacePodCount holds pod count per namespace for a node.
+type NamespacePodCount struct {
+	Namespace string `json:"namespace"`
+	Count     int    `json:"count"`
+}
+
+// PodInfo holds minimal pod details for the --show-pods output.
+type PodInfo struct {
+	Name      string `json:"name"`
+	Namespace string `json:"namespace"`
+	IP        string `json:"ip"`
+	Status    string `json:"status"`
 }
 
 // NodeSummaryInfo holds aggregate counts for the report.
@@ -44,6 +72,11 @@ type NodeSummaryInfo struct {
 	ExhaustedNodes int `json:"exhausted_nodes"`
 }
 
+var (
+	showPods       bool
+	statusFilter   string
+)
+
 var nodeCmd = &cobra.Command{
 	Use:   "node",
 	Short: "Show per-node ENI and IP capacity: instance type limits vs current allocation",
@@ -52,6 +85,8 @@ var nodeCmd = &cobra.Command{
 }
 
 func init() {
+	nodeCmd.Flags().BoolVar(&showPods, "show-pods", false, "List pods on each node with daemonset/workload breakdown")
+	nodeCmd.Flags().StringVar(&statusFilter, "status", "", "Only show nodes matching this status: EXHAUSTED, WARNING, or OK (requires --show-pods)")
 	EksCmd.AddCommand(nodeCmd)
 }
 
@@ -165,6 +200,25 @@ func runNode(cmd *cobra.Command, args []string) error {
 	report.Summary.CheckedNodes = len(report.Nodes)
 	report.Summary.SkippedNodes = len(report.Skipped)
 
+	// 10b. Collect pod data when --show-pods is set.
+	if showPods {
+		if err := enrichNodesWithPods(ctx, k8sClient, &report); err != nil {
+			return err
+		}
+	}
+
+	// 10c. Filter by --status if set.
+	if statusFilter != "" {
+		filter := strings.ToUpper(statusFilter)
+		filtered := make([]NodeENIStatus, 0, len(report.Nodes))
+		for _, n := range report.Nodes {
+			if n.Status == filter {
+				filtered = append(filtered, n)
+			}
+		}
+		report.Nodes = filtered
+	}
+
 	// 11. Output.
 	printer, err := output.NewPrinter(getOutputFormat(), os.Stdout)
 	if err != nil {
@@ -195,6 +249,38 @@ func runNode(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Show pod details per node when --show-pods is set.
+	if showPods {
+		for _, n := range report.Nodes {
+			if n.Pods == nil {
+				continue
+			}
+			fmt.Fprintf(os.Stdout, "\n--- %s (%s, %s%%, %s) — %d pods (%d daemonset, %d workload) ---\n",
+				n.NodeName, n.InstanceType, n.Utilization, n.Status,
+				n.Pods.TotalPods, n.Pods.DaemonSets, n.Pods.Workloads)
+
+			// Namespace summary.
+			nsParts := make([]string, 0, len(n.Pods.ByNamespace))
+			for _, ns := range n.Pods.ByNamespace {
+				nsParts = append(nsParts, fmt.Sprintf("%s:%d", ns.Namespace, ns.Count))
+			}
+			fmt.Fprintf(os.Stdout, "  Namespaces: %s\n", strings.Join(nsParts, ", "))
+
+			if len(n.Pods.DaemonSetPods) > 0 {
+				fmt.Fprintf(os.Stdout, "  DaemonSet pods:\n")
+				for _, pod := range n.Pods.DaemonSetPods {
+					fmt.Fprintf(os.Stdout, "    %-50s %-20s %s\n", pod.Namespace+"/"+pod.Name, pod.IP, pod.Status)
+				}
+			}
+			if len(n.Pods.WorkloadPods) > 0 {
+				fmt.Fprintf(os.Stdout, "  Workload pods:\n")
+				for _, pod := range n.Pods.WorkloadPods {
+					fmt.Fprintf(os.Stdout, "    %-50s %-20s %s\n", pod.Namespace+"/"+pod.Name, pod.IP, pod.Status)
+				}
+			}
+		}
+	}
+
 	if err := printSkippedNodes(report.Skipped); err != nil {
 		return err
 	}
@@ -209,6 +295,81 @@ func runNode(cmd *cobra.Command, args []string) error {
 
 	_, _ = os.Stdout.WriteString(outgoingString(report.Summary.CheckedNodes, report.Summary.SkippedNodes, atRisk+warningCount))
 	return nil
+}
+
+// enrichNodesWithPods queries all pods in the cluster and attaches pod summaries
+// to each node in the report. Pods are classified as daemonset or workload based
+// on their owner references.
+func enrichNodesWithPods(ctx context.Context, client *k8spkg.Client, report *NodeReport) error {
+	podList, err := client.Clientset.CoreV1().Pods("").List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to list pods: %w", err)
+	}
+
+	// Index pods by node name.
+	podsByNode := map[string][]corev1.Pod{}
+	for i := range podList.Items {
+		pod := &podList.Items[i]
+		if pod.Spec.NodeName != "" {
+			podsByNode[pod.Spec.NodeName] = append(podsByNode[pod.Spec.NodeName], *pod)
+		}
+	}
+
+	for i := range report.Nodes {
+		node := &report.Nodes[i]
+		pods := podsByNode[node.NodeName]
+
+		summary := &NodePodSummary{}
+		nsCounts := map[string]int{}
+
+		for _, pod := range pods {
+			summary.TotalPods++
+			nsCounts[pod.Namespace]++
+
+			info := PodInfo{
+				Name:      pod.Name,
+				Namespace: pod.Namespace,
+				IP:        pod.Status.PodIP,
+				Status:    string(pod.Status.Phase),
+			}
+
+			if isDaemonSetPod(&pod) {
+				summary.DaemonSets++
+				summary.DaemonSetPods = append(summary.DaemonSetPods, info)
+			} else {
+				summary.Workloads++
+				summary.WorkloadPods = append(summary.WorkloadPods, info)
+			}
+		}
+
+		// Sort namespace counts by count descending.
+		for ns, count := range nsCounts {
+			summary.ByNamespace = append(summary.ByNamespace, NamespacePodCount{
+				Namespace: ns,
+				Count:     count,
+			})
+		}
+		sort.Slice(summary.ByNamespace, func(a, b int) bool {
+			return summary.ByNamespace[a].Count > summary.ByNamespace[b].Count
+		})
+
+		node.Pods = summary
+	}
+	return nil
+}
+
+// isDaemonSetPod returns true if the pod is owned by a DaemonSet.
+func isDaemonSetPod(pod *corev1.Pod) bool {
+	for _, ref := range pod.OwnerReferences {
+		if ref.Kind == "DaemonSet" {
+			return true
+		}
+		// Pods owned by a Node (static pods like kube-proxy) are treated as daemonsets.
+		if ref.Kind == "Node" {
+			return true
+		}
+	}
+	return false
 }
 
 // outgoingString formats the trailing summary line.
