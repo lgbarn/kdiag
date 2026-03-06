@@ -12,9 +12,6 @@ import (
 	"github.com/lgbarn/kdiag/pkg/netpol"
 )
 
-// helper to build a protocol pointer.
-func protoPtr(p corev1.Protocol) *corev1.Protocol { return &p }
-
 // helper to build an IntOrString pointer from an int.
 func portPtr(n int) *intstr.IntOrString { v := intstr.FromInt(n); return &v }
 
