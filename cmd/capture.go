@@ -35,7 +35,7 @@ func init() {
 	rootCmd.AddCommand(captureCmd)
 
 	captureCmd.Flags().StringVarP(&captureFilter, "filter", "f", "", "BPF filter expression for tcpdump")
-	captureCmd.Flags().StringVarP(&captureOutput, "output", "w", "", "Write raw pcap data to file path")
+	captureCmd.Flags().StringVarP(&captureOutput, "write", "w", "", "Write raw pcap data to file path")
 	captureCmd.Flags().StringVarP(&captureInterface, "interface", "i", "any", "Network interface to capture on")
 	captureCmd.Flags().IntVarP(&captureCount, "count", "c", 0, "Stop after receiving count packets (0 = unlimited)")
 	captureCmd.Flags().DurationVarP(&captureDuration, "duration", "d", 0, "Stop capture after duration (e.g. 30s, 2m; 0 = unlimited)")
@@ -176,13 +176,13 @@ func runCapture(cmd *cobra.Command, args []string) error {
 		outputWriter = os.Stdout
 	}
 
-	// Exec into the container — tcpdump is already running as PID 1, so we
-	// attach via exec to stream its output.
-	execErr := k8s.ExecInContainer(ctx, client, k8s.ExecOpts{
+	// Attach to the container — tcpdump is already running as the container's
+	// entrypoint (set via Command in EphemeralContainerOpts), so we attach to
+	// its stdout/stderr stream rather than exec-ing a second process.
+	execErr := k8s.AttachToContainer(ctx, client, k8s.AttachOpts{
 		Namespace:     namespace,
 		PodName:       podName,
 		ContainerName: containerName,
-		Command:       tcpdumpCmd,
 		Stdin:         nil,
 		Stdout:        outputWriter,
 		Stderr:        os.Stderr,
