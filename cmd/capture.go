@@ -211,7 +211,11 @@ func runCapture(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return fmt.Errorf("failed to create output file %q: %w", captureOutput, err)
 		}
-		defer f.Close()
+		defer func() {
+			if cerr := f.Close(); cerr != nil {
+				fmt.Fprintf(os.Stderr, "warning: failed to close output file: %v\n", cerr)
+			}
+		}()
 		outputWriter = f
 	} else {
 		outputWriter = os.Stdout

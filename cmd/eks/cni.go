@@ -233,7 +233,7 @@ func runCNI(cmd *cobra.Command, args []string) error {
 // DaemonSet status, CNI configuration, and per-node capacity.
 func printCNITable(r CNIReport, prefixDelegation bool) error {
 	// Section 1: DaemonSet Status.
-	fmt.Fprintln(os.Stdout, "=== aws-node DaemonSet Status ===")
+	fmt.Fprintln(os.Stdout, "=== aws-node DaemonSet Status ===") //nolint:errcheck
 	dsPrinter := output.NewTablePrinter(os.Stdout)
 	dsPrinter.PrintHeader("DESIRED", "READY", "UPDATED")
 	dsPrinter.PrintRow(
@@ -244,10 +244,10 @@ func printCNITable(r CNIReport, prefixDelegation bool) error {
 	if err := dsPrinter.Flush(); err != nil {
 		return err
 	}
-	fmt.Fprintln(os.Stdout)
+	fmt.Fprintln(os.Stdout) //nolint:errcheck
 
 	// Section 2: CNI Configuration.
-	fmt.Fprintln(os.Stdout, "=== VPC CNI Configuration ===")
+	fmt.Fprintln(os.Stdout, "=== VPC CNI Configuration ===") //nolint:errcheck
 	cfgPrinter := output.NewTablePrinter(os.Stdout)
 	cfgPrinter.PrintHeader("SETTING", "VALUE")
 	cfgPrinter.PrintRow("ENABLE_PREFIX_DELEGATION", strconv.FormatBool(r.Config.PrefixDelegation))
@@ -259,14 +259,14 @@ func printCNITable(r CNIReport, prefixDelegation bool) error {
 	if err := cfgPrinter.Flush(); err != nil {
 		return err
 	}
-	fmt.Fprintln(os.Stdout)
+	fmt.Fprintln(os.Stdout) //nolint:errcheck
 
 	// Section 3: Per-node Capacity.
 	prefixNote := ""
 	if prefixDelegation {
 		prefixNote = " (prefix delegation: x16)"
 	}
-	fmt.Fprintf(os.Stdout, "=== Node IP Capacity%s ===\n", prefixNote)
+	fmt.Fprintf(os.Stdout, "=== Node IP Capacity%s ===\n", prefixNote) //nolint:errcheck
 	nodePrinter := output.NewTablePrinter(os.Stdout)
 	nodePrinter.PrintHeader("NODE", "INSTANCE_TYPE", "MAX_ENIS", "MAX_IPS/ENI", "MAX_IPS", "CURRENT_IPS", "UTIL%", "STATUS")
 	for _, n := range r.Nodes {
@@ -293,7 +293,7 @@ func printCNITable(r CNIReport, prefixDelegation bool) error {
 		return err
 	}
 
-	fmt.Fprintf(os.Stdout, "\n%d nodes checked, %d exhausted, %d skipped\n",
+	fmt.Fprintf(os.Stdout, "\n%d nodes checked, %d exhausted, %d skipped\n", //nolint:errcheck
 		len(r.Nodes), len(r.IPExhausted), len(r.Skipped))
 
 	return nil

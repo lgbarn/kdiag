@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -59,7 +60,11 @@ func StreamPodLogs(ctx context.Context, client *Client, namespace, podName, cont
 	if err != nil {
 		return fmt.Errorf("failed to open log stream for pod %s/%s: %w", namespace, podName, err)
 	}
-	defer stream.Close()
+	defer func() {
+		if cerr := stream.Close(); cerr != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to close log stream: %v\n", cerr)
+		}
+	}()
 
 	scanner := bufio.NewScanner(stream)
 	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
