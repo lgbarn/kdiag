@@ -56,6 +56,10 @@ func runConnectivity(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("unsupported protocol %q: must be tcp or http", connectivityProtocol)
 	}
 
+	if err := ValidateDebugImage(); err != nil {
+		return err
+	}
+
 	if IsVerbose() {
 		fmt.Fprintf(os.Stderr, "[kdiag] building kubernetes client\n")
 	}

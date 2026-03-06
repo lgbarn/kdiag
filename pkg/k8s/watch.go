@@ -8,6 +8,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/fields"
 )
 
 // ListPodsBySelector returns all pods in namespace that match the given label selector.
@@ -24,10 +25,14 @@ func ListPodsBySelector(ctx context.Context, client *Client, namespace, labelSel
 // ListEvents returns events in namespace filtered by involvedObject kind and name.
 // If kind is empty, the field selector is built without the kind constraint.
 func ListEvents(ctx context.Context, client *Client, namespace, kind, name string) ([]corev1.Event, error) {
-	fieldSelector := fmt.Sprintf("involvedObject.name=%s,involvedObject.namespace=%s", name, namespace)
-	if kind != "" {
-		fieldSelector += fmt.Sprintf(",involvedObject.kind=%s", kind)
+	fs := fields.Set{
+		"involvedObject.name":      name,
+		"involvedObject.namespace": namespace,
 	}
+	if kind != "" {
+		fs["involvedObject.kind"] = kind
+	}
+	fieldSelector := fs.String()
 
 	eventList, err := client.Clientset.CoreV1().Events(namespace).List(ctx, metav1.ListOptions{
 		FieldSelector: fieldSelector,

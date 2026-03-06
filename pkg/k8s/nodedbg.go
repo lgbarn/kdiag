@@ -36,6 +36,8 @@ func CreateNodeDebugPod(ctx context.Context, client *Client, opts NodeDebugOpts)
 
 	hostPathType := corev1.HostPathDirectory
 
+	activeDeadline := int64(3600) // auto-terminate after 1 hour if cleanup misses
+
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      podName,
@@ -45,8 +47,9 @@ func CreateNodeDebugPod(ctx context.Context, client *Client, opts NodeDebugOpts)
 			},
 		},
 		Spec: corev1.PodSpec{
-			NodeName:      opts.NodeName,
-			RestartPolicy: corev1.RestartPolicyNever,
+			NodeName:              opts.NodeName,
+			RestartPolicy:         corev1.RestartPolicyNever,
+			ActiveDeadlineSeconds: &activeDeadline,
 			HostPID:       true,
 			HostNetwork:   true,
 			HostIPC:       true,

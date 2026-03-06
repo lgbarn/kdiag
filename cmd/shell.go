@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -45,6 +47,10 @@ func runShell(cmd *cobra.Command, args []string) error {
 // runPodShell implements Path A: ephemeral container shell in a pod.
 func runPodShell(cmd *cobra.Command, args []string) error {
 	podName := args[0]
+
+	if err := ValidateDebugImage(); err != nil {
+		return err
+	}
 
 	if IsVerbose() {
 		fmt.Fprintf(os.Stderr, "[kdiag] building kubernetes client\n")
@@ -158,9 +164,8 @@ func runPodShell(cmd *cobra.Command, args []string) error {
 func runNodeShell(cmd *cobra.Command, args []string) error {
 	nodeName := shellNodeName
 
-	// Fargate nodes cannot host privileged debug pods
-	if k8s.IsFargateNode(nodeName) {
-		return fmt.Errorf("error: node %q appears to be a Fargate virtual node — node-level debugging is not supported on Fargate\n\nFargate nodes do not support privileged pods or host-namespace access", nodeName)
+	if err := ValidateDebugImage(); err != nil {
+		return err
 	}
 
 	if IsVerbose() {
@@ -173,20 +178,42 @@ func runNodeShell(cmd *cobra.Command, args []string) error {
 	}
 
 	namespace := client.Namespace
+	ctx := context.Background()
+
+	// Fetch the node from the API to validate it exists and detect compute type.
+	node, err := client.Clientset.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
+	if err != nil {
+		if errors.IsNotFound(err) {
+			return fmt.Errorf("error: node %q not found in the cluster", nodeName)
+		}
+		return fmt.Errorf("error getting node %q: %w", nodeName, err)
+	}
+	if k8s.DetectNodeComputeType(node) == k8s.ComputeTypeFargate {
+		return fmt.Errorf("error: node %q is a Fargate virtual node — node-level debugging is not supported on Fargate\n\nFargate nodes do not support privileged pods or host-namespace access", nodeName)
+	}
 
 	if IsVerbose() {
 		fmt.Fprintf(os.Stderr, "[kdiag] checking RBAC permissions for node shell\n")
 	}
 
-	ctx := context.Background()
-
-	// RBAC pre-flight: verify user can create pods before attempting to create a privileged debug pod.
+	// RBAC pre-flight: verify user can create pods and attach before attempting to create a privileged debug pod.
 	canCreate, err := k8s.CheckSingleRBAC(ctx, client.Clientset, namespace, "create", "pods", "")
 	if err != nil {
 		return fmt.Errorf("error checking RBAC: %w", err)
 	}
-	if !canCreate {
-		return fmt.Errorf("insufficient permissions: you do not have permission to create pods in namespace %q — node-level debugging requires pods/create", namespace)
+	canAttach, err := k8s.CheckSingleRBAC(ctx, client.Clientset, namespace, "create", "pods", "attach")
+	if err != nil {
+		return fmt.Errorf("error checking RBAC: %w", err)
+	}
+	if !canCreate || !canAttach {
+		var missing []string
+		if !canCreate {
+			missing = append(missing, "pods/create")
+		}
+		if !canAttach {
+			missing = append(missing, "pods/attach")
+		}
+		return fmt.Errorf("insufficient permissions in namespace %q: missing %s", namespace, strings.Join(missing, ", "))
 	}
 
 	if IsVerbose() {
@@ -206,10 +233,11 @@ func runNodeShell(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("error creating node debug pod: %w", err)
 	}
 
-	// Cleanup on exit
+	// Cleanup on exit with a bounded timeout.
 	defer func() {
 		fmt.Fprintf(os.Stderr, "[kdiag] cleaning up debug pod %q\n", podName)
-		cleanupCtx := context.Background()
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cleanupCancel()
 		if delErr := k8s.DeleteNodeDebugPod(cleanupCtx, client, namespace, podName); delErr != nil {
 			fmt.Fprintf(os.Stderr, "warning: failed to delete debug pod %q: %v\n", podName, delErr)
 		}

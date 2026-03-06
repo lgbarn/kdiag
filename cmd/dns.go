@@ -31,6 +31,10 @@ func init() {
 func runDNS(cmd *cobra.Command, args []string) error {
 	target := args[0]
 
+	if err := ValidateDebugImage(); err != nil {
+		return err
+	}
+
 	if IsVerbose() {
 		fmt.Fprintf(os.Stderr, "[kdiag] building kubernetes client\n")
 	}
@@ -156,7 +160,9 @@ func runDNS(cmd *cobra.Command, args []string) error {
 		Resolved:    resolved,
 		QueryTimeMs: queryTimeMs,
 		CoreDNS:     coreDNSPods,
-		RawOutput:   stdout.String(),
+	}
+	if IsVerbose() {
+		result.RawOutput = stdout.String()
 	}
 
 	if execErr != nil {

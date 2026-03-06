@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"syscall"
 	"time"
@@ -67,8 +68,16 @@ func runCapture(cmd *cobra.Command, args []string) error {
 
 	namespace := client.Namespace
 
+	// Validate image before any cluster work.
+	if err := ValidateDebugImage(); err != nil {
+		return err
+	}
+
+	preflightCtx, preflightCancel := context.WithTimeout(context.Background(), GetTimeout())
+	defer preflightCancel()
+
 	// Verify pod exists.
-	_, err = client.Clientset.CoreV1().Pods(namespace).Get(context.Background(), podName, metav1.GetOptions{})
+	_, err = client.Clientset.CoreV1().Pods(namespace).Get(preflightCtx, podName, metav1.GetOptions{})
 	if err != nil {
 		if errors.IsNotFound(err) {
 			return fmt.Errorf("pod %q not found in namespace %q", podName, namespace)
@@ -77,12 +86,21 @@ func runCapture(cmd *cobra.Command, args []string) error {
 	}
 
 	// RBAC pre-flight check.
-	checks, err := k8s.CheckEphemeralContainerRBAC(context.Background(), client.Clientset, namespace)
+	checks, err := k8s.CheckEphemeralContainerRBAC(preflightCtx, client.Clientset, namespace)
 	if err != nil {
 		return fmt.Errorf("RBAC check failed: %w", err)
 	}
 	if msg := k8s.FormatRBACError(checks); msg != "" {
 		return fmt.Errorf("insufficient permissions:\n%s", msg)
+	}
+
+	// Validate network interface name (IFNAMSIZ = 16 on Linux, alphanumeric + dash/dot/underscore).
+	if len(captureInterface) > 15 {
+		return fmt.Errorf("--interface value %q is too long (max 15 chars)", captureInterface)
+	}
+	ifaceRe := regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
+	if !ifaceRe.MatchString(captureInterface) {
+		return fmt.Errorf("--interface value %q contains invalid characters", captureInterface)
 	}
 
 	// Build tcpdump command.
@@ -177,7 +195,7 @@ func runCapture(cmd *cobra.Command, args []string) error {
 	// Prepare output destination.
 	var outputWriter *os.File
 	if captureOutput != "" {
-		f, err := os.Create(captureOutput)
+		f, err := os.OpenFile(captureOutput, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
 		if err != nil {
 			return fmt.Errorf("failed to create output file %q: %w", captureOutput, err)
 		}

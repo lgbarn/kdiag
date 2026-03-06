@@ -3,7 +3,9 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"os"
+	"regexp"
 
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
@@ -17,6 +19,25 @@ import (
 	"github.com/lgbarn/kdiag/pkg/netpol"
 	"github.com/lgbarn/kdiag/pkg/output"
 )
+
+// urlPattern matches http(s) URLs that may appear in error messages.
+var urlPattern = regexp.MustCompile(`https?://[^\s"']+`)
+
+// sanitizeError strips URLs and truncates long error messages to avoid leaking
+// infrastructure topology (cluster endpoints, AWS request IDs) in JSON output.
+func sanitizeError(msg string) string {
+	sanitized := urlPattern.ReplaceAllStringFunc(msg, func(rawURL string) string {
+		u, err := url.Parse(rawURL)
+		if err != nil {
+			return "<redacted-url>"
+		}
+		return u.Scheme + "://" + u.Hostname() + "/..."
+	})
+	if len(sanitized) > 256 {
+		sanitized = sanitized[:256] + "..."
+	}
+	return sanitized
+}
 
 var diagnoseCmd = &cobra.Command{
 	Use:   "diagnose <pod>",
@@ -49,7 +70,7 @@ func runDiagnose(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		report.Checks = append(report.Checks, DiagnoseCheckResult{
 			Name: "inspect", Severity: SeverityError,
-			Summary: "pod inspection failed", Error: err.Error(),
+			Summary: "pod inspection failed", Error: sanitizeError(err.Error()),
 		})
 	} else {
 		sev, sum := inspectSeverity(inspectResult)
@@ -65,7 +86,7 @@ func runDiagnose(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		report.Checks = append(report.Checks, DiagnoseCheckResult{
 			Name: "dns", Severity: SeverityError,
-			Summary: "failed to list CoreDNS pods", Error: err.Error(),
+			Summary: "failed to list CoreDNS pods", Error: sanitizeError(err.Error()),
 		})
 	} else {
 		pods := dns.EvaluateCoreDNSPods(coreDNSList.Items)
@@ -80,21 +101,21 @@ func runDiagnose(cmd *cobra.Command, args []string) error {
 	if podErr != nil {
 		report.Checks = append(report.Checks, DiagnoseCheckResult{
 			Name: "netpol", Severity: SeverityError,
-			Summary: "failed to get pod for network policy check", Error: podErr.Error(),
+			Summary: "failed to get pod for network policy check", Error: sanitizeError(podErr.Error()),
 		})
 	} else {
 		policies, listErr := client.Clientset.NetworkingV1().NetworkPolicies(namespace).List(ctx, metav1.ListOptions{})
 		if listErr != nil {
 			report.Checks = append(report.Checks, DiagnoseCheckResult{
 				Name: "netpol", Severity: SeverityError,
-				Summary: "failed to list NetworkPolicies", Error: listErr.Error(),
+				Summary: "failed to list NetworkPolicies", Error: sanitizeError(listErr.Error()),
 			})
 		} else {
 			matched, matchErr := netpol.MatchingPolicies(policies.Items, pod.Labels)
 			if matchErr != nil {
 				report.Checks = append(report.Checks, DiagnoseCheckResult{
 					Name: "netpol", Severity: SeverityError,
-					Summary: "failed to evaluate NetworkPolicies", Error: matchErr.Error(),
+					Summary: "failed to evaluate NetworkPolicies", Error: sanitizeError(matchErr.Error()),
 				})
 			} else {
 				summaries := make([]netpol.PolicySummary, 0, len(matched))
@@ -121,8 +142,8 @@ func runDiagnose(cmd *cobra.Command, args []string) error {
 		ec2Client, ec2Err := awspkg.NewEC2Client(ctx, region, "")
 		if ec2Err != nil {
 			report.Checks = append(report.Checks,
-				DiagnoseCheckResult{Name: "cni", Severity: SeverityError, Summary: "failed to create EC2 client", Error: ec2Err.Error()},
-				DiagnoseCheckResult{Name: "sg", Severity: SeverityError, Summary: "failed to create EC2 client", Error: ec2Err.Error()},
+				DiagnoseCheckResult{Name: "cni", Severity: SeverityError, Summary: "failed to create EC2 client", Error: sanitizeError(ec2Err.Error())},
+				DiagnoseCheckResult{Name: "sg", Severity: SeverityError, Summary: "failed to create EC2 client", Error: sanitizeError(ec2Err.Error())},
 			)
 		} else {
 			// EKS CNI check.
@@ -130,7 +151,7 @@ func runDiagnose(cmd *cobra.Command, args []string) error {
 			if dsErr != nil {
 				report.Checks = append(report.Checks, DiagnoseCheckResult{
 					Name: "cni", Severity: SeverityError,
-					Summary: "failed to get aws-node DaemonSet", Error: dsErr.Error(),
+					Summary: "failed to get aws-node DaemonSet", Error: sanitizeError(dsErr.Error()),
 				})
 			} else {
 				dsHealthy := ds.Status.NumberReady == ds.Status.DesiredNumberScheduled
@@ -138,14 +159,14 @@ func runDiagnose(cmd *cobra.Command, args []string) error {
 				if nodeErr != nil {
 					report.Checks = append(report.Checks, DiagnoseCheckResult{
 						Name: "cni", Severity: SeverityError,
-						Summary: "failed to list nodes", Error: nodeErr.Error(),
+						Summary: "failed to list nodes", Error: sanitizeError(nodeErr.Error()),
 					})
 				} else {
 					exhaustedCount, countErr := countExhaustedNodes(ctx, ec2Client, nodeList.Items)
 					if countErr != nil {
 						report.Checks = append(report.Checks, DiagnoseCheckResult{
 							Name: "cni", Severity: SeverityError,
-							Summary: "failed to count exhausted nodes", Error: countErr.Error(),
+							Summary: "failed to count exhausted nodes", Error: sanitizeError(countErr.Error()),
 						})
 					} else {
 						sev, sum := cniSeverity(dsHealthy, exhaustedCount)
@@ -160,21 +181,21 @@ func runDiagnose(cmd *cobra.Command, args []string) error {
 			if pod == nil {
 				report.Checks = append(report.Checks, DiagnoseCheckResult{
 					Name: "sg", Severity: SeverityError,
-					Summary: "failed to get pod for SG check", Error: podErr.Error(),
+					Summary: "failed to get pod for SG check", Error: sanitizeError(podErr.Error()),
 				})
 			} else {
 				sgIDs, sgErr := eks.ResolveENISGs(ctx, client, ec2Client, pod)
 				if sgErr != nil {
 					report.Checks = append(report.Checks, DiagnoseCheckResult{
 						Name: "sg", Severity: SeverityError,
-						Summary: "failed to determine security groups", Error: sgErr.Error(),
+						Summary: "failed to determine security groups", Error: sanitizeError(sgErr.Error()),
 					})
 				} else {
 					sgs, detailErr := awspkg.GetSecurityGroupDetails(ctx, ec2Client, sgIDs)
 					if detailErr != nil {
 						report.Checks = append(report.Checks, DiagnoseCheckResult{
 							Name: "sg", Severity: SeverityError,
-							Summary: "failed to get security group details", Error: detailErr.Error(),
+							Summary: "failed to get security group details", Error: sanitizeError(detailErr.Error()),
 						})
 					} else {
 						sev, sum := sgSeverity(len(sgs))
