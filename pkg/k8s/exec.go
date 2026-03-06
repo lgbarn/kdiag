@@ -4,12 +4,14 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"os/signal"
 	"syscall"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/httpstream"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/remotecommand"
 	"golang.org/x/term"
@@ -40,9 +42,48 @@ type AttachOpts struct {
 	TTY           bool
 }
 
-// ExecInContainer executes a command inside the specified container using the
-// Kubernetes exec subresource. It sets up a WebSocket executor with SPDY fallback
-// and, when TTY=true, puts the local terminal into raw mode and monitors resize events.
+// buildExecutor creates a WebSocket executor with SPDY fallback for the given
+// HTTP method and URL. It is used by both ExecInContainer and AttachToContainer.
+func buildExecutor(config *rest.Config, method string, url *url.URL) (remotecommand.Executor, error) {
+	wsExec, err := remotecommand.NewWebSocketExecutor(config, "GET", url.String())
+	if err != nil {
+		return nil, fmt.Errorf("failed to create WebSocket executor: %w", err)
+	}
+
+	spdyExec, err := remotecommand.NewSPDYExecutor(config, method, url)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create SPDY executor: %w", err)
+	}
+
+	exec, err := remotecommand.NewFallbackExecutor(wsExec, spdyExec, httpstream.IsUpgradeFailure)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create fallback executor: %w", err)
+	}
+
+	return exec, nil
+}
+
+// setupRawTerminal puts the local terminal into raw mode and starts a goroutine
+// that forwards SIGWINCH resize events. It returns a cleanup function (restore
+// the terminal) and a TerminalSizeQueue ready to be passed to StreamOptions.
+// The caller must call cleanup (typically via defer) when the session ends.
+func setupRawTerminal(ctx context.Context) (cleanup func(), tsq *terminalSizeQueue, err error) {
+	fd := int(os.Stdin.Fd())
+	oldState, err := term.MakeRaw(fd)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to put terminal into raw mode: %w", err)
+	}
+	cleanup = func() { term.Restore(fd, oldState) } //nolint:errcheck
+
+	tsq = newTerminalSizeQueue()
+	tsq.monitor(ctx)
+	return cleanup, tsq, nil
+}
+
+// ExecInContainer is used by dns, connectivity, and other commands that run ad-hoc commands in debug containers.
+// It executes a command inside the specified container using the Kubernetes exec
+// subresource. It sets up a WebSocket executor with SPDY fallback and, when
+// TTY=true, puts the local terminal into raw mode and monitors resize events.
 func ExecInContainer(ctx context.Context, client *Client, opts ExecOpts) error {
 	req := client.Clientset.CoreV1().RESTClient().Post().
 		Resource("pods").
@@ -59,19 +100,9 @@ func ExecInContainer(ctx context.Context, client *Client, opts ExecOpts) error {
 		TTY:       opts.TTY,
 	}, scheme.ParameterCodec)
 
-	wsExec, err := remotecommand.NewWebSocketExecutor(client.Config, "GET", req.URL().String())
+	exec, err := buildExecutor(client.Config, "POST", req.URL())
 	if err != nil {
-		return fmt.Errorf("failed to create WebSocket executor: %w", err)
-	}
-
-	spdyExec, err := remotecommand.NewSPDYExecutor(client.Config, "POST", req.URL())
-	if err != nil {
-		return fmt.Errorf("failed to create SPDY executor: %w", err)
-	}
-
-	exec, err := remotecommand.NewFallbackExecutor(wsExec, spdyExec, httpstream.IsUpgradeFailure)
-	if err != nil {
-		return fmt.Errorf("failed to create fallback executor: %w", err)
+		return err
 	}
 
 	streamOpts := remotecommand.StreamOptions{
@@ -82,15 +113,11 @@ func ExecInContainer(ctx context.Context, client *Client, opts ExecOpts) error {
 	}
 
 	if opts.TTY {
-		fd := int(os.Stdin.Fd())
-		oldState, err := term.MakeRaw(fd)
+		cleanup, tsq, err := setupRawTerminal(ctx)
 		if err != nil {
-			return fmt.Errorf("failed to put terminal into raw mode: %w", err)
+			return err
 		}
-		defer term.Restore(fd, oldState)
-
-		tsq := newTerminalSizeQueue()
-		tsq.monitor(ctx)
+		defer cleanup()
 		streamOpts.TerminalSizeQueue = tsq
 	}
 
@@ -121,19 +148,9 @@ func AttachToContainer(ctx context.Context, client *Client, opts AttachOpts) err
 		TTY:       opts.TTY,
 	}, scheme.ParameterCodec)
 
-	wsExec, err := remotecommand.NewWebSocketExecutor(client.Config, "GET", req.URL().String())
+	exec, err := buildExecutor(client.Config, "POST", req.URL())
 	if err != nil {
-		return fmt.Errorf("failed to create WebSocket executor: %w", err)
-	}
-
-	spdyExec, err := remotecommand.NewSPDYExecutor(client.Config, "POST", req.URL())
-	if err != nil {
-		return fmt.Errorf("failed to create SPDY executor: %w", err)
-	}
-
-	exec, err := remotecommand.NewFallbackExecutor(wsExec, spdyExec, httpstream.IsUpgradeFailure)
-	if err != nil {
-		return fmt.Errorf("failed to create fallback executor: %w", err)
+		return err
 	}
 
 	var errWriter io.Writer
@@ -149,15 +166,11 @@ func AttachToContainer(ctx context.Context, client *Client, opts AttachOpts) err
 	}
 
 	if opts.TTY {
-		fd := int(os.Stdin.Fd())
-		oldState, err := term.MakeRaw(fd)
+		cleanup, tsq, err := setupRawTerminal(ctx)
 		if err != nil {
-			return fmt.Errorf("failed to put terminal into raw mode: %w", err)
+			return err
 		}
-		defer term.Restore(fd, oldState)
-
-		tsq := newTerminalSizeQueue()
-		tsq.monitor(ctx)
+		defer cleanup()
 		streamOpts.TerminalSizeQueue = tsq
 	}
 

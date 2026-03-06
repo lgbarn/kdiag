@@ -101,6 +101,17 @@ func runCapture(cmd *cobra.Command, args []string) error {
 	}
 
 	if captureFilter != "" {
+		// Defensive validation: reject null bytes and excessively long filters.
+		// The real protection against shell injection is argv execution (no shell),
+		// but we reject obviously malformed inputs early.
+		if len(captureFilter) > 1024 {
+			return fmt.Errorf("--filter value is too long (%d chars); maximum allowed is 1024", len(captureFilter))
+		}
+		for _, b := range []byte(captureFilter) {
+			if b == 0 {
+				return fmt.Errorf("--filter value contains a null byte, which is not allowed")
+			}
+		}
 		// BPF filter goes as trailing args.
 		tcpdumpCmd = append(tcpdumpCmd, captureFilter)
 	}

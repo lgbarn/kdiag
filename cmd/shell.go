@@ -103,8 +103,7 @@ func runPodShell(cmd *cobra.Command, args []string) error {
 
 	if !allAllowed {
 		rbacErr := k8s.FormatRBACError(checks)
-		fmt.Fprintf(os.Stderr, "error: insufficient permissions to use ephemeral containers\n\n%s", rbacErr)
-		os.Exit(1)
+		return fmt.Errorf("insufficient permissions to use ephemeral containers\n\n%s", rbacErr)
 	}
 
 	if IsVerbose() {
@@ -129,8 +128,7 @@ func runPodShell(cmd *cobra.Command, args []string) error {
 			if rbacCheckErr == nil {
 				rbacMsg := k8s.FormatRBACError(checks2)
 				if rbacMsg != "" {
-					fmt.Fprintf(os.Stderr, "error: forbidden creating ephemeral container\n\n%s", rbacMsg)
-					os.Exit(1)
+					return fmt.Errorf("forbidden creating ephemeral container\n\n%s", rbacMsg)
 				}
 			}
 			return fmt.Errorf("error: forbidden creating ephemeral container in pod %q — check your RBAC permissions", podName)
@@ -187,10 +185,23 @@ func runNodeShell(cmd *cobra.Command, args []string) error {
 	namespace := client.Namespace
 
 	if IsVerbose() {
-		fmt.Fprintf(os.Stderr, "[kdiag] creating node debug pod on node %q\n", nodeName)
+		fmt.Fprintf(os.Stderr, "[kdiag] checking RBAC permissions for node shell\n")
 	}
 
 	ctx := context.Background()
+
+	// RBAC pre-flight: verify user can create pods before attempting to create a privileged debug pod.
+	canCreate, err := k8s.CheckSingleRBAC(ctx, client.Clientset, namespace, "create", "pods", "")
+	if err != nil {
+		return fmt.Errorf("error checking RBAC: %w", err)
+	}
+	if !canCreate {
+		return fmt.Errorf("insufficient permissions: you do not have permission to create pods in namespace %q — node-level debugging requires pods/create", namespace)
+	}
+
+	if IsVerbose() {
+		fmt.Fprintf(os.Stderr, "[kdiag] creating node debug pod on node %q\n", nodeName)
+	}
 
 	waitCtx, waitCancel := context.WithTimeout(ctx, GetTimeout())
 	defer waitCancel()

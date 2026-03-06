@@ -63,6 +63,29 @@ func CheckEphemeralContainerRBAC(ctx context.Context, client kubernetes.Interfac
 	return results, nil
 }
 
+// CheckSingleRBAC performs a single SelfSubjectAccessReview for the given verb,
+// resource, and subresource in the specified namespace. It returns true if the
+// action is allowed, or an error if the API call fails.
+func CheckSingleRBAC(ctx context.Context, client kubernetes.Interface, namespace, verb, resource, subresource string) (bool, error) {
+	ssar := &authorizationv1.SelfSubjectAccessReview{
+		Spec: authorizationv1.SelfSubjectAccessReviewSpec{
+			ResourceAttributes: &authorizationv1.ResourceAttributes{
+				Namespace:   namespace,
+				Verb:        verb,
+				Resource:    resource,
+				Subresource: subresource,
+			},
+		},
+	}
+
+	result, err := client.AuthorizationV1().SelfSubjectAccessReviews().Create(ctx, ssar, metav1.CreateOptions{})
+	if err != nil {
+		return false, fmt.Errorf("failed to check RBAC for %s %s: %w", verb, resource, err)
+	}
+
+	return result.Status.Allowed, nil
+}
+
 // FormatRBACError produces a human-readable error message listing denied
 // permissions and a remediation message for the cluster admin.
 func FormatRBACError(checks []RBACCheck) string {

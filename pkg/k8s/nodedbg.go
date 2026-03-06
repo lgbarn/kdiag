@@ -13,6 +13,9 @@ import (
 	watchtools "k8s.io/client-go/tools/watch"
 )
 
+// boolPtr returns a pointer to the given bool value.
+func boolPtr(b bool) *bool { return &b }
+
 // NodeDebugOpts holds the parameters for creating a node debug pod.
 type NodeDebugOpts struct {
 	NodeName        string
@@ -69,6 +72,9 @@ func CreateNodeDebugPod(ctx context.Context, client *Client, opts NodeDebugOpts)
 					Image: opts.Image,
 					Stdin: true,
 					TTY:   true,
+					SecurityContext: &corev1.SecurityContext{
+						Privileged: boolPtr(true),
+					},
 					VolumeMounts: []corev1.VolumeMount{
 						{
 							Name:      "host-root",
