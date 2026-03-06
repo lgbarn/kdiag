@@ -33,12 +33,12 @@ func NewTablePrinter(w io.Writer) *TablePrinter {
 
 // PrintHeader writes the header row to the tabwriter buffer.
 func (t *TablePrinter) PrintHeader(columns ...string) {
-	fmt.Fprintln(t.w, strings.Join(columns, "\t")) //nolint:errcheck
+	fmt.Fprintln(t.w, strings.Join(columns, "\t"))
 }
 
 // PrintRow writes a data row to the tabwriter buffer.
 func (t *TablePrinter) PrintRow(values ...string) {
-	fmt.Fprintln(t.w, strings.Join(values, "\t")) //nolint:errcheck
+	fmt.Fprintln(t.w, strings.Join(values, "\t"))
 }
 
 // Flush flushes the tabwriter, producing aligned output.

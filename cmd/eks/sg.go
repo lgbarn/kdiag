@@ -131,13 +131,13 @@ func formatPortRange(protocol string, from, to int32) (string, string) {
 
 // printSGTable renders the SGReport as structured human-readable table output.
 func printSGTable(r SGReport) error {
-	fmt.Fprintf(os.Stdout, "Pod:       %s/%s\n", r.Namespace, r.PodName) //nolint:errcheck
-	fmt.Fprintf(os.Stdout, "Node:      %s\n", r.NodeName)              //nolint:errcheck
-	fmt.Fprintf(os.Stdout, "ENI Source: %s\n", r.ENISource)             //nolint:errcheck
+	fmt.Fprintf(os.Stdout, "Pod:       %s/%s\n", r.Namespace, r.PodName)
+	fmt.Fprintf(os.Stdout, "Node:      %s\n", r.NodeName)
+	fmt.Fprintf(os.Stdout, "ENI Source: %s\n", r.ENISource)
 	if r.ENIID != "" {
-		fmt.Fprintf(os.Stdout, "ENI ID:    %s\n", r.ENIID) //nolint:errcheck
+		fmt.Fprintf(os.Stdout, "ENI ID:    %s\n", r.ENIID)
 	}
-	fmt.Fprintln(os.Stdout) //nolint:errcheck
+	fmt.Fprintln(os.Stdout)
 
 	if len(r.SecurityGroups) == 0 {
 		fmt.Fprintln(os.Stdout, "No security groups found.")
