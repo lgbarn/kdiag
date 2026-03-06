@@ -123,6 +123,8 @@ func WaitForPodRunning(ctx context.Context, client *Client, namespace, podName s
 			return true, nil
 		case corev1.PodFailed:
 			return false, fmt.Errorf("pod %s/%s failed: %s", namespace, podName, pod.Status.Message)
+		case corev1.PodSucceeded:
+			return true, nil
 		}
 
 		return false, nil
