@@ -130,16 +130,19 @@ func summarisePorts(ports []networkingv1.NetworkPolicyPort) []string {
 	return result
 }
 
-func summarisePeers(peers []networkingv1.NetworkPolicyPeer) (from []string, ipBlocks []string) {
+// summarisePeerList is the shared implementation for both summarisePeers and
+// summariseToPeers. fallbackLabel is returned as the sole entry in the first
+// return value when peers is empty (e.g. "<all sources>" or "<all destinations>").
+func summarisePeerList(peers []networkingv1.NetworkPolicyPeer, fallbackLabel string) (entries []string, ipBlocks []string) {
 	if len(peers) == 0 {
-		return []string{"<all sources>"}, nil
+		return []string{fallbackLabel}, nil
 	}
 	for _, peer := range peers {
 		if peer.PodSelector != nil {
-			from = append(from, "pods: "+FormatSelector(peer.PodSelector))
+			entries = append(entries, "pods: "+FormatSelector(peer.PodSelector))
 		}
 		if peer.NamespaceSelector != nil {
-			from = append(from, "namespaces: "+FormatSelector(peer.NamespaceSelector))
+			entries = append(entries, "namespaces: "+FormatSelector(peer.NamespaceSelector))
 		}
 		if peer.IPBlock != nil {
 			entry := "ipBlock: " + peer.IPBlock.CIDR
@@ -149,29 +152,15 @@ func summarisePeers(peers []networkingv1.NetworkPolicyPeer) (from []string, ipBl
 			ipBlocks = append(ipBlocks, entry)
 		}
 	}
-	return from, ipBlocks
+	return entries, ipBlocks
+}
+
+func summarisePeers(peers []networkingv1.NetworkPolicyPeer) (from []string, ipBlocks []string) {
+	return summarisePeerList(peers, "<all sources>")
 }
 
 func summariseToPeers(peers []networkingv1.NetworkPolicyPeer) (to []string, ipBlocks []string) {
-	if len(peers) == 0 {
-		return []string{"<all destinations>"}, nil
-	}
-	for _, peer := range peers {
-		if peer.PodSelector != nil {
-			to = append(to, "pods: "+FormatSelector(peer.PodSelector))
-		}
-		if peer.NamespaceSelector != nil {
-			to = append(to, "namespaces: "+FormatSelector(peer.NamespaceSelector))
-		}
-		if peer.IPBlock != nil {
-			entry := "ipBlock: " + peer.IPBlock.CIDR
-			if len(peer.IPBlock.Except) > 0 {
-				entry += " except [" + strings.Join(peer.IPBlock.Except, ",") + "]"
-			}
-			ipBlocks = append(ipBlocks, entry)
-		}
-	}
-	return to, ipBlocks
+	return summarisePeerList(peers, "<all destinations>")
 }
 
 func summariseIngressRule(rule networkingv1.NetworkPolicyIngressRule) RuleSummary {

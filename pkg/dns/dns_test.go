@@ -69,6 +69,30 @@ const nxdomainDigOutput = `
 ;; MSG SIZE  rcvd: 50
 `
 
+// aaaaDigOutput simulates a response with a single AAAA record.
+const aaaaDigOutput = `
+; <<>> DiG 9.18.1 <<>> ipv6svc.default.svc.cluster.local @10.96.0.10 +noall +answer +stats
+;; global options: +cmd
+ipv6svc.default.svc.cluster.local. 5	IN	AAAA	fd00::1
+
+;; Query time: 2 msec
+;; SERVER: 10.96.0.10#53(10.96.0.10) (UDP)
+;; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 42
+;; MSG SIZE  rcvd: 75
+`
+
+// noErrorEmptyAnswerOutput simulates a NOERROR response with no answer records
+// (e.g. a negative cache hit or CNAME-only response).
+const noErrorEmptyAnswerOutput = `
+; <<>> DiG 9.18.1 <<>> cname-only.default.svc.cluster.local @10.96.0.10 +noall +answer +stats
+;; global options: +cmd
+
+;; Query time: 1 msec
+;; SERVER: 10.96.0.10#53(10.96.0.10) (UDP)
+;; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 99
+;; MSG SIZE  rcvd: 42
+`
+
 // TestParseDigOutput verifies IP extraction, query time parsing, and error
 // cases for NXDOMAIN and empty output.
 func TestParseDigOutput(t *testing.T) {
@@ -98,6 +122,32 @@ func TestParseDigOutput(t *testing.T) {
 		}
 		if !strings.Contains(err.Error(), "NXDOMAIN") {
 			t.Errorf("expected error to mention NXDOMAIN, got: %v", err)
+		}
+	})
+
+	t.Run("AAAA record", func(t *testing.T) {
+		ips, ms, err := dns.ParseDigOutput(aaaaDigOutput)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(ips) != 1 {
+			t.Fatalf("expected 1 IP, got %d: %v", len(ips), ips)
+		}
+		if ips[0] != "fd00::1" {
+			t.Errorf("expected IP fd00::1, got %q", ips[0])
+		}
+		if ms != 2 {
+			t.Errorf("expected query time 2 ms, got %d", ms)
+		}
+	})
+
+	t.Run("NOERROR with empty answer returns nil error", func(t *testing.T) {
+		ips, _, err := dns.ParseDigOutput(noErrorEmptyAnswerOutput)
+		if err != nil {
+			t.Fatalf("expected nil error for NOERROR+empty answer, got: %v", err)
+		}
+		if len(ips) != 0 {
+			t.Errorf("expected empty IP slice, got %v", ips)
 		}
 	})
 

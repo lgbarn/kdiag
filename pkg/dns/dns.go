@@ -43,8 +43,10 @@ func BuildFQDN(name, namespace string) string {
 //	dig <target> @<server> +noall +answer +stats
 //
 // It extracts all A/AAAA answer IPs and the reported query time. An error is
-// returned when the output is empty, contains no answer lines, and the DNS
-// status is not NOERROR.
+// returned when the output is empty, or when the DNS status is a non-NOERROR
+// status such as NXDOMAIN or SERVFAIL. A NOERROR response with an empty
+// answer section (e.g. for a CNAME-only or negative cache hit) returns
+// (nil, queryTimeMs, nil).
 func ParseDigOutput(raw string) (resolved []string, queryTimeMs int64, err error) {
 	if strings.TrimSpace(raw) == "" {
 		return nil, 0, fmt.Errorf("dig output is empty")
@@ -98,7 +100,9 @@ func ParseDigOutput(raw string) (resolved []string, queryTimeMs int64, err error
 		if status != "" && status != "NOERROR" {
 			return nil, queryTimeMs, fmt.Errorf("DNS query returned status %s", status)
 		}
-		return nil, queryTimeMs, fmt.Errorf("no answer records found in dig output")
+		// NOERROR (or no status line found) with an empty answer section is
+		// valid — return nil slice with no error.
+		return nil, queryTimeMs, nil
 	}
 
 	return resolved, queryTimeMs, nil
