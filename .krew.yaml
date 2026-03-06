@@ -1,0 +1,59 @@
+apiVersion: krew.googlecontainertools.github.com/v1alpha2
+kind: Plugin
+metadata:
+  name: kdiag
+spec:
+  version: "v0.1.0"
+  homepage: https://github.com/lgbarn/kdiag
+  shortDescription: "Kubernetes diagnostics CLI with EKS support"
+  description: |
+    kdiag is a Kubernetes diagnostics CLI with first-class EKS support.
+    It consolidates network debugging, shell access, packet capture, DNS
+    diagnostics, log aggregation, and AWS-specific checks into a single binary.
+  caveats: |
+    EKS commands (eks cni, eks sg, eks node) require valid AWS credentials
+    with ec2:Describe* permissions.
+
+    Shell and capture commands require RBAC permission for the
+    pods/ephemeralcontainers subresource.
+  platforms:
+    - selector:
+        matchLabels:
+          os: darwin
+          arch: amd64
+      uri: https://github.com/lgbarn/kdiag/releases/download/v0.1.0/kdiag_0.1.0_darwin_amd64.tar.gz
+      sha256: "REPLACE_AFTER_RELEASE"
+      files:
+        - from: "kdiag"
+          to: "kubectl-kdiag"
+      bin: "kubectl-kdiag"
+    - selector:
+        matchLabels:
+          os: darwin
+          arch: arm64
+      uri: https://github.com/lgbarn/kdiag/releases/download/v0.1.0/kdiag_0.1.0_darwin_arm64.tar.gz
+      sha256: "REPLACE_AFTER_RELEASE"
+      files:
+        - from: "kdiag"
+          to: "kubectl-kdiag"
+      bin: "kubectl-kdiag"
+    - selector:
+        matchLabels:
+          os: linux
+          arch: amd64
+      uri: https://github.com/lgbarn/kdiag/releases/download/v0.1.0/kdiag_0.1.0_linux_amd64.tar.gz
+      sha256: "REPLACE_AFTER_RELEASE"
+      files:
+        - from: "kdiag"
+          to: "kubectl-kdiag"
+      bin: "kubectl-kdiag"
+    - selector:
+        matchLabels:
+          os: linux
+          arch: arm64
+      uri: https://github.com/lgbarn/kdiag/releases/download/v0.1.0/kdiag_0.1.0_linux_arm64.tar.gz
+      sha256: "REPLACE_AFTER_RELEASE"
+      files:
+        - from: "kdiag"
+          to: "kubectl-kdiag"
+      bin: "kubectl-kdiag"
