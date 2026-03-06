@@ -1,0 +1,60 @@
+version: 2
+
+project_name: kdiag
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: kdiag
+    main: ./
+    binary: kdiag
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{.Date}}
+
+archives:
+  - id: kdiag
+    builds:
+      - kdiag
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format: tar.gz
+    files:
+      - README.md
+      - LICENSE
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+
+brews:
+  - name: kdiag
+    repository:
+      owner: lgbarn
+      name: homebrew-kdiag
+      branch: main
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    homepage: "https://github.com/lgbarn/kdiag"
+    description: "Kubernetes diagnostics CLI with first-class EKS support"
+    license: "MIT"
+    skip_upload: auto
+    test: |
+      system "#{bin}/kdiag", "--help"
+    install: |
+      bin.install "kdiag"
