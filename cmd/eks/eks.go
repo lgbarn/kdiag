@@ -3,6 +3,7 @@ package eks
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -89,6 +90,9 @@ func resolveRegion(host string) string {
 	}
 	region, err := awspkg.RegionFromHost(host)
 	if err != nil {
+		if isVerbose() {
+			fmt.Fprintf(os.Stderr, "[kdiag] could not detect region from host %q: %v; falling back to AWS config\n", host, err)
+		}
 		return ""
 	}
 	return region
