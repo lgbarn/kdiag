@@ -63,7 +63,6 @@ func (pw *prefixWriter) Write(p []byte) (int, error) {
 			continue
 		}
 
-		pw.mu.Lock()
 		var writeErr error
 		if pw.jsonMode {
 			// The Kubernetes log stream with Timestamps:true prepends an RFC3339
@@ -81,14 +80,17 @@ func (pw *prefixWriter) Write(p []byte) (int, error) {
 			}
 			b, err := json.Marshal(rec)
 			if err != nil {
-				pw.mu.Unlock()
+				fmt.Fprintf(os.Stderr, "warning: failed to marshal log line for pod %s: %v\n", pw.podName, err)
 				continue
 			}
+			pw.mu.Lock()
 			_, writeErr = fmt.Fprintf(pw.base, "%s\n", b)
+			pw.mu.Unlock()
 		} else {
+			pw.mu.Lock()
 			_, writeErr = fmt.Fprintf(pw.base, "%s%s\n", pw.prefix, line)
+			pw.mu.Unlock()
 		}
-		pw.mu.Unlock()
 
 		if writeErr != nil {
 			return 0, writeErr
@@ -196,5 +198,6 @@ func runLogs(cmd *cobra.Command, args []string) error {
 	}
 
 	wg.Wait()
+	signal.Stop(sigCh)
 	return nil
 }

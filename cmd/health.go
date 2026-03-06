@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"time"
 
 	"github.com/spf13/cobra"
 	appsv1 "k8s.io/api/apps/v1"
@@ -62,6 +61,7 @@ type ControllerSummary struct {
 // Shared by health.go and inspect.go (same package); keep fields in sync if modified.
 type EventSummary struct {
 	Namespace string `json:"namespace"`
+	Object    string `json:"object,omitempty"`
 	Type      string `json:"type"`
 	Reason    string `json:"reason"`
 	Message   string `json:"message"`
@@ -359,14 +359,14 @@ func runHealth(cmd *cobra.Command, args []string) error {
 	}
 	eventSummaries := make([]EventSummary, 0, limit)
 	for _, ev := range eventList.Items[:limit] {
-		age := time.Since(ev.LastTimestamp.Time).Round(time.Second).String()
 		eventSummaries = append(eventSummaries, EventSummary{
 			Namespace: ev.Namespace,
+			Object:    ev.InvolvedObject.Kind + "/" + ev.InvolvedObject.Name,
 			Type:      ev.Type,
 			Reason:    ev.Reason,
 			Message:   ev.Message,
 			Count:     ev.Count,
-			Age:       age,
+			Age:       eventAge(ev.LastTimestamp, ev.EventTime),
 		})
 	}
 
@@ -449,12 +449,10 @@ func runHealth(cmd *cobra.Command, args []string) error {
 	if len(eventSummaries) > 0 {
 		fmt.Fprintf(os.Stdout, "\nRecent Warning Events (showing up to 20)\n")
 		printer.PrintHeader("NAMESPACE", "OBJECT", "REASON", "MESSAGE", "COUNT", "AGE")
-		for i, ev := range eventSummaries {
-			rawEv := eventList.Items[i]
-			obj := rawEv.InvolvedObject.Kind + "/" + rawEv.InvolvedObject.Name
+		for _, ev := range eventSummaries {
 			printer.PrintRow(
 				ev.Namespace,
-				obj,
+				ev.Object,
 				ev.Reason,
 				ev.Message,
 				fmt.Sprintf("%d", ev.Count),

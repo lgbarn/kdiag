@@ -165,6 +165,7 @@ func inspectPod(ctx context.Context, client *k8s.Client, namespace, name string)
 
 	// Build owner chain starting with the pod itself.
 	chain := []OwnerChainEntry{{Kind: "Pod", Name: name}}
+ownerLoop:
 	for _, ref := range pod.OwnerReferences {
 		if ref.Controller == nil || !*ref.Controller {
 			continue
@@ -181,7 +182,7 @@ func inspectPod(ctx context.Context, client *k8s.Client, namespace, name string)
 				if IsVerbose() {
 					fmt.Fprintf(os.Stderr, "[kdiag] warning: could not get replicaset %q: %v\n", ref.Name, rsErr)
 				}
-				break
+				break ownerLoop
 			}
 			for _, deployRef := range rs.OwnerReferences {
 				if deployRef.Controller == nil || !*deployRef.Controller {
@@ -192,16 +193,20 @@ func inspectPod(ctx context.Context, client *k8s.Client, namespace, name string)
 					break
 				}
 			}
+			break ownerLoop
 		case "DaemonSet":
 			chain = append(chain, OwnerChainEntry{Kind: "DaemonSet", Name: ref.Name})
+			break ownerLoop
 		case "StatefulSet":
 			chain = append(chain, OwnerChainEntry{Kind: "StatefulSet", Name: ref.Name})
+			break ownerLoop
 		case "Job":
 			chain = append(chain, OwnerChainEntry{Kind: "Job", Name: ref.Name})
+			break ownerLoop
 		default:
 			chain = append(chain, OwnerChainEntry{Kind: ref.Kind, Name: ref.Name})
+			break ownerLoop
 		}
-		break // only one controller ref
 	}
 
 	// Build conditions.
