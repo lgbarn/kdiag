@@ -18,9 +18,15 @@ kdiag/
 │   ├── netpol.go         # netpol subcommand
 │   ├── logs.go           # logs subcommand
 │   ├── inspect.go        # inspect subcommand
-│   └── health.go         # health subcommand; defines shared EventSummary type
+│   ├── health.go         # health subcommand; defines shared EventSummary type
+│   └── eks/
+│       ├── eks.go        # EksCmd parent, Init() pattern, shared flag accessors
+│       ├── cni.go        # eks cni subcommand
+│       ├── sg.go         # eks sg subcommand
+│       └── node.go       # eks node subcommand
 └── pkg/
     ├── k8s/              # Kubernetes client, ephemeral containers, exec, RBAC, compute, watch
+    ├── aws/              # EC2 API client, ENI queries, security group lookups, EKS detection
     ├── dns/              # FQDN building, dig output parsing, CoreDNS pod evaluation
     ├── netpol/           # NetworkPolicy matching and rule summarization
     └── output/           # Table and JSON output formatting
@@ -65,6 +71,35 @@ The Phase 2 network diagnostic commands use a different execution model dependin
 **Read-only commands** (`trace`, `netpol`): build a `k8s.Client`, fetch pods/services/EndpointSlices/NetworkPolicies via the Kubernetes API, compute results in-process using `pkg/dns` or `pkg/netpol` helpers, then print. No ephemeral containers or exec calls are made.
 
 All four commands support `--output json` via the `pkg/output` printer abstraction.
+
+### cmd/eks/
+
+The `eks` command group is a separate Go package (`package eks`) in `cmd/eks/`. This isolation means it can declare its own package-level variables for the shared flag pointers without polluting the top-level `cmd` package.
+
+#### eks.go — Init() pattern
+
+Because `cmd/eks/` is a separate package, it cannot access the root command's flag variables directly. Instead, `root.go` calls `eks.Init(root, configFlags, outputFormat, timeout, verbose)` during `init()`, which stores the flag pointers in package-level variables and registers `EksCmd` on the root command.
+
+```
+root.go: cmd.Init() call
+  │
+  └─ eks.Init(root, configFlags, outputFormat, timeout, verbose)
+       ├─ stores shared flag pointers
+       ├─ registers --aws-profile and --aws-region as persistent flags on EksCmd
+       └─ root.AddCommand(EksCmd)
+```
+
+This pattern lets each `eks` subcommand call `getOutputFormat()`, `getTimeout()`, and `isVerbose()` as package-local accessors backed by the same underlying flag values as the rest of the CLI.
+
+Each subcommand (`cni.go`, `sg.go`, `node.go`) registers itself on `EksCmd` via its own `init()` function.
+
+#### EKS cluster guard
+
+Every `eks` subcommand calls `requireEKS(host)` before making any AWS API calls. This function checks that the kubeconfig server endpoint matches the EKS hostname pattern (`<id>.<az>.<region>.eks.amazonaws.com`) by delegating to `pkg/aws.IsEKSCluster`. Commands that inadvertently target a non-EKS cluster (e.g., a local kind cluster) fail immediately with a descriptive error rather than making EC2 API calls that would return nothing useful.
+
+#### EC2 client construction
+
+The shared `newEC2Client(ctx, host)` helper resolves the AWS region (explicit `--aws-region` flag or parsed from the EKS host via `pkg/aws.RegionFromHost`), then calls `pkg/aws.NewEC2Client`. All three subcommands use this helper.
 
 ### logs.go, inspect.go, health.go
 
@@ -115,9 +150,27 @@ Background: the standard `admin` ClusterRole does not include `pods/ephemeralcon
 
 `IsFargateNode` applies the same node name check independently, used by the node shell path to reject Fargate nodes before any API calls.
 
+`DetectNodeComputeType` operates on a `*corev1.Node` rather than a pod and adds a third compute type. Detection order:
+
+1. Check for the `eks.amazonaws.com/compute-type=auto` label → `ComputeTypeAutoMode`
+2. Check for the `fargate-ip-` node name prefix → `ComputeTypeFargate`
+3. Default → `ComputeTypeManaged`
+
+This three-way classification is used by `kdiag eks node`, which includes Auto Mode nodes in its report (with a note) while still skipping Fargate nodes.
+
+The `ComputeType` constants are:
+
+| Constant | Value | Meaning |
+|----------|-------|---------|
+| `ComputeTypeManaged` | `"managed"` | Standard EC2 managed node group |
+| `ComputeTypeFargate` | `"fargate"` | AWS Fargate virtual node |
+| `ComputeTypeAutoMode` | `"auto-mode"` | EKS Auto Mode node |
+
 This detection informs command behavior:
 - Pod shell on Fargate: warning emitted, attempt proceeds
 - Node shell on Fargate: immediate error, no Kubernetes calls made
+- `eks sg` on Fargate pod: immediate error
+- `eks cni` and `eks node`: Fargate nodes skipped; Auto Mode nodes included with a note
 
 ### ephemeral.go
 
@@ -165,6 +218,53 @@ Kubernetes list and streaming helpers used by the Phase 3 observability commands
 The pod is labeled `app.kubernetes.io/managed-by: kdiag` for easy identification.
 
 `DeleteNodeDebugPod` is called via `defer` in the node shell command, ensuring cleanup even when the session ends abnormally. A warning is printed to stderr if deletion fails (so the operator knows to clean up manually).
+
+## pkg/aws — AWS Package
+
+Low-level EC2 API wrappers and EKS cluster detection utilities. No Kubernetes client dependency — all functions take plain Go types and the `EC2API` interface.
+
+### ec2iface.go
+
+`EC2API` is a minimal interface over the EC2 client surface:
+
+```go
+type EC2API interface {
+    DescribeInstances(...)       (*ec2.DescribeInstancesOutput, error)
+    DescribeInstanceTypes(...)   (*ec2.DescribeInstanceTypesOutput, error)
+    DescribeNetworkInterfaces(...) (*ec2.DescribeNetworkInterfacesOutput, error)
+    DescribeSecurityGroups(...)  (*ec2.DescribeSecurityGroupsOutput, error)
+}
+```
+
+Using an interface (rather than the concrete `*ec2.Client`) allows tests to inject a mock without hitting AWS. A compile-time assertion `var _ EC2API = (*ec2.Client)(nil)` enforces that the real client always satisfies the interface.
+
+### client.go
+
+`NewEC2Client(ctx, region, profile string) (EC2API, error)` loads AWS config via the standard SDK credential chain (environment variables, shared config files, IAM role, IRSA). Empty `region` and `profile` strings are silently ignored.
+
+A credential pre-flight check (`cfg.Credentials.Retrieve`) runs before returning the client, so callers receive a clear error message with remediation steps before any real API call is attempted.
+
+### detect.go
+
+`IsEKSCluster(host string) bool` and `RegionFromHost(host string) (string, error)` parse the EKS API server endpoint to validate it and extract the AWS region. The expected hostname format is `<id>.<az-code>.<region>.eks.amazonaws.com`.
+
+`ParseInstanceID(providerID string) (string, error)` extracts the EC2 instance ID from a node's `spec.providerID` in `aws:///<az>/<instance-id>` format.
+
+### eni.go
+
+**`ListNodeENIs(ctx, api, instanceID) (*NodeENIInfo, error)`** — returns all ENIs attached to the instance with their private IP counts and security group IDs. Wraps `DescribeNetworkInterfaces` filtered by `attachment.instance-id`.
+
+**`GetInstanceTypeLimits(ctx, api, instanceTypes []string) (map[string]*InstanceLimits, error)`** — batch-queries ENI and IP-per-ENI limits for a list of instance types via `DescribeInstanceTypes`. The caller collects unique instance types from all nodes and makes a single API call.
+
+### sg.go
+
+**`GetSecurityGroupDetails(ctx, api, groupIDs []string) ([]SecurityGroupDetail, error)`** — fetches full inbound and outbound rules for the given security group IDs. Maps EC2 `IpPermission` types to the kdiag `SGRule` domain type, converting protocol `-1` to `"all"`.
+
+**`GetENISecurityGroups(ctx, api, eniID string) ([]string, error)`** — returns security group IDs for a branch ENI (used by `eks sg` for Security Groups for Pods).
+
+**`GetNodePrimaryENISecurityGroups(ctx, api, instanceID string) ([]string, error)`** — returns security group IDs for the primary ENI (device index 0) of an EC2 instance.
+
+**`ParsePodENIAnnotation(annotation string) ([]PodENIAnnotation, error)`** — unmarshals the JSON value of the `vpc.amazonaws.com/pod-eni` annotation used by the VPC CNI Security Groups for Pods feature.
 
 ## pkg/dns — DNS Package
 
@@ -358,6 +458,82 @@ cmd/netpol.go  (read-only, no ephemeral containers)
   └─ print NetpolResult as structured text or JSON
 ```
 
+### kdiag eks cni
+
+```
+cmd/eks/cni.go
+  │
+  ├─ k8s.NewClient(configFlags)
+  │
+  ├─ requireEKS(host)              ← reject non-EKS clusters immediately
+  │
+  ├─ AppsV1.DaemonSets("kube-system").Get("aws-node")
+  │    └─ extract DaemonSetStatus + CNIConfig from env vars
+  │
+  ├─ newEC2Client(ctx, host)       ← resolveRegion(host) → pkg/aws.NewEC2Client
+  │
+  ├─ CoreV1.Nodes().List()
+  │    └─ classify: skip Fargate, extract instanceType + instanceID per node
+  │
+  ├─ aws.GetInstanceTypeLimits(uniqueTypes)   ← DescribeInstanceTypes (batched)
+  │
+  └─ per node: aws.ListNodeENIs(instanceID)   ← DescribeNetworkInterfaces
+       └─ calculate utilization; flag EXHAUSTED at >= 85%
+       └─ print CNIReport as table (3 sections) or JSON
+```
+
+### kdiag eks sg \<pod\>
+
+```
+cmd/eks/sg.go
+  │
+  ├─ k8s.NewClient(configFlags)
+  │
+  ├─ requireEKS(host)
+  │
+  ├─ CoreV1.Pods(namespace).Get(podName)
+  │    └─ k8s.DetectComputeType(pod) → reject Fargate pods
+  │
+  ├─ newEC2Client(ctx, host)
+  │
+  ├─ pod has vpc.amazonaws.com/pod-eni annotation?
+  │    ├─ YES → aws.ParsePodENIAnnotation() → eniID
+  │    │         aws.GetENISecurityGroups(eniID)   ← DescribeNetworkInterfaces
+  │    └─ NO  → CoreV1.Nodes().Get(pod.Spec.NodeName)
+  │              aws.ParseInstanceID(node.Spec.ProviderID)
+  │              aws.GetNodePrimaryENISecurityGroups(instanceID) ← DescribeNetworkInterfaces
+  │
+  └─ aws.GetSecurityGroupDetails(sgIDs)   ← DescribeSecurityGroups
+       └─ print SGReport as structured table or JSON
+```
+
+### kdiag eks node
+
+```
+cmd/eks/node.go
+  │
+  ├─ k8s.NewClient(configFlags)
+  │
+  ├─ requireEKS(host)
+  │
+  ├─ newEC2Client(ctx, host)
+  │
+  ├─ CoreV1.Nodes().List()
+  │    └─ k8s.DetectNodeComputeType(node) per node:
+  │         Fargate  → skip
+  │         AutoMode → eligible with note
+  │         Managed  → eligible
+  │
+  ├─ aws.GetInstanceTypeLimits(uniqueTypes)   ← DescribeInstanceTypes (batched)
+  │
+  └─ per node: aws.ListNodeENIs(instanceID)   ← DescribeNetworkInterfaces
+       └─ calculate utilization
+       │    < 70% → OK
+       │    70-84% → WARNING
+       │    >= 85% → EXHAUSTED
+       └─ print NodeReport as table or JSON
+```
+
 ## Dependencies
 
 | Package | Version | Role |
@@ -369,3 +545,4 @@ cmd/netpol.go  (read-only, no ephemeral containers)
 | `k8s.io/apimachinery` | v0.32.3 | Kubernetes API machinery |
 | `golang.org/x/term` | v0.25.0 | Raw terminal mode and resize |
 | `github.com/fatih/color` | v1.18.0 | ANSI color output for `kdiag logs` pod prefixes |
+| `github.com/aws/aws-sdk-go-v2` | v1.x | AWS SDK for EC2 API calls in `pkg/aws` and `cmd/eks` |
