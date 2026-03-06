@@ -1,6 +1,7 @@
 # Compiled binary
 kdiag
 *.exe
+dist/
 
 # OS files
 .DS_Store

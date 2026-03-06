@@ -23,38 +23,32 @@ Kubernetes diagnostics CLI with first-class EKS support.
 
 ## Installation
 
-### Homebrew
+### Binary (GitHub Release)
 
-```sh
-brew install lgbarn/kdiag/kdiag
-```
-
-### krew
-
-Install from a local manifest (pre-release):
-
-```sh
-kubectl krew install --manifest=.krew.yaml
-```
-
-Install from the krew index (once available):
-
-```sh
-kubectl krew install kdiag
-```
-
-### Binary (curl)
+Download the latest release for your platform from the [Releases](https://github.com/lgbarn/kdiag/releases) page, or use curl (replace `VERSION` with the release version, e.g. `0.1.0`):
 
 ```sh
 # macOS arm64
-curl -L https://github.com/lgbarn/kdiag/releases/download/v0.1.0/kdiag_0.1.0_darwin_arm64.tar.gz | tar xz
-chmod +x kdiag
+curl -L https://github.com/lgbarn/kdiag/releases/download/v${VERSION}/kdiag_${VERSION}_darwin_arm64.tar.gz | tar xz
+sudo mv kdiag /usr/local/bin/
+
+# macOS amd64
+curl -L https://github.com/lgbarn/kdiag/releases/download/v${VERSION}/kdiag_${VERSION}_darwin_amd64.tar.gz | tar xz
 sudo mv kdiag /usr/local/bin/
 
 # Linux amd64
-curl -L https://github.com/lgbarn/kdiag/releases/download/v0.1.0/kdiag_0.1.0_linux_amd64.tar.gz | tar xz
-chmod +x kdiag
+curl -L https://github.com/lgbarn/kdiag/releases/download/v${VERSION}/kdiag_${VERSION}_linux_amd64.tar.gz | tar xz
 sudo mv kdiag /usr/local/bin/
+
+# Linux arm64
+curl -L https://github.com/lgbarn/kdiag/releases/download/v${VERSION}/kdiag_${VERSION}_linux_arm64.tar.gz | tar xz
+sudo mv kdiag /usr/local/bin/
+```
+
+### Build from source
+
+```sh
+go install github.com/lgbarn/kdiag@latest
 ```
 
 ### kubectl plugin
