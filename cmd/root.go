@@ -1,13 +1,71 @@
 package cmd
 
-import "github.com/spf13/cobra"
+import (
+	"time"
+
+	"github.com/spf13/cobra"
+	"k8s.io/cli-runtime/pkg/genericclioptions"
+)
+
+var (
+	// ConfigFlags holds standard kubectl-style kubeconfig/context/namespace flags.
+	ConfigFlags *genericclioptions.ConfigFlags
+
+	// outputFormat is the --output / -o flag value (table, json).
+	outputFormat string
+
+	// debugImage is the --image flag: debug container image to use.
+	debugImage string
+
+	// imagePullSecret is the --image-pull-secret flag.
+	imagePullSecret string
+
+	// timeout is the --timeout flag duration for operations.
+	timeout time.Duration
+
+	// verbose enables debug logging when true.
+	verbose bool
+)
 
 var rootCmd = &cobra.Command{
-	Use:   "kdiag",
-	Short: "Kubernetes diagnostics CLI",
+	Use:           "kdiag",
+	Short:         "Kubernetes diagnostics CLI",
+	SilenceUsage:  true,
+	SilenceErrors: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return cmd.Help()
+	},
 }
 
-// Execute runs the root command.
+func init() {
+	// Initialize standard kubectl-compatible config flags (kubeconfig, context, namespace, etc.)
+	ConfigFlags = genericclioptions.NewConfigFlags(true)
+	ConfigFlags.AddFlags(rootCmd.PersistentFlags())
+
+	// Custom global flags for kdiag
+	rootCmd.PersistentFlags().StringVarP(&outputFormat, "output", "o", "table", "Output format: table or json")
+	rootCmd.PersistentFlags().StringVar(&debugImage, "image", "nicolaka/netshoot", "Debug container image")
+	rootCmd.PersistentFlags().StringVar(&imagePullSecret, "image-pull-secret", "", "Image pull secret for private registry debug images")
+	rootCmd.PersistentFlags().DurationVar(&timeout, "timeout", 30*time.Second, "Timeout for operations (e.g. 30s, 2m)")
+	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose/debug logging")
+}
+
+// Execute runs the root command. Returns any error.
 func Execute() error {
 	return rootCmd.Execute()
 }
+
+// GetOutputFormat returns the value of the --output flag.
+func GetOutputFormat() string { return outputFormat }
+
+// GetDebugImage returns the value of the --image flag.
+func GetDebugImage() string { return debugImage }
+
+// GetImagePullSecret returns the value of the --image-pull-secret flag.
+func GetImagePullSecret() string { return imagePullSecret }
+
+// GetTimeout returns the value of the --timeout flag.
+func GetTimeout() time.Duration { return timeout }
+
+// IsVerbose returns true when --verbose/-v is set.
+func IsVerbose() bool { return verbose }
