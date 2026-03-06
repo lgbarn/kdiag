@@ -1,31 +1,127 @@
 # kdiag
 
-Kubernetes diagnostics CLI with first-class EKS support.
+**Stop guessing why your pods are broken.** Just describe the problem — kdiag figures out the rest.
 
-`kdiag` consolidates network debugging, shell access, packet capture, DNS diagnostics, log aggregation, and AWS-specific checks into a single binary — replacing a toolbox of one-off scripts.
+kdiag is a Kubernetes diagnostics CLI that pairs with [Claude Code](https://docs.anthropic.com/en/docs/claude-code) to give you an AI-powered troubleshooting partner. Instead of juggling `kubectl describe`, `kubectl logs`, AWS console tabs, and Stack Overflow, you tell Claude what's wrong and it runs the right commands, interprets the results, and walks you through the fix.
 
-## Features
+## How It Works
 
-- **diagnose** — meta-command that runs all checks against a pod and surfaces severity-ranked results
-- **inspect** — pod/container status, restart counts, and state details
-- **dns** — CoreDNS health, pod DNS resolution, and lookup testing
-- **netpol** — NetworkPolicy matching and reachability analysis
-- **connectivity** — TCP/UDP reachability probes between pods or to external endpoints
-- **health** — cluster-level health checks (nodes, system pods)
-- **eks cni** — AWS VPC CNI DaemonSet health and per-node IP exhaustion check
-- **eks sg** — Security group inspection for EKS nodes and pods
-- **eks node** — EKS node metadata, instance types, and availability zone details
-- **shell** — Drop an ephemeral debug container into a running pod
-- **capture** — Live packet capture via tcpdump in an ephemeral container
-- **logs** — Multi-container log aggregation with filtering
-- **trace** — Network trace and latency diagnostics
-- **completion** — Shell completion for bash, zsh, fish, and PowerShell
+Install kdiag and the Claude Code skill. Then just talk to Claude:
+
+> **You:** "my pod keeps crashing in production"
+>
+> Claude runs `kdiag diagnose my-pod -n prod`, sees the container is OOMKilled, checks memory limits, and tells you exactly what to change.
+
+> **You:** "pod-a can't reach the payment service"
+>
+> Claude traces the network path with `kdiag trace pod-a payment-svc`, checks DNS, tests connectivity, scans NetworkPolicies, and pinpoints that a netpol is blocking egress on port 443.
+
+> **You:** "pods are stuck pending on our EKS cluster"
+>
+> Claude runs `kdiag eks cni`, finds 3 nodes with exhausted IP addresses, and recommends enabling prefix delegation.
+
+No memorizing flags. No copy-pasting between terminals. You describe the symptom, Claude drives the investigation.
+
+### What the Skill Gives You
+
+The Claude Code skill isn't just a wrapper — it includes troubleshooting playbooks that Claude follows to systematically work through common failure patterns:
+
+- **Pod failures** — CrashLoopBackOff, Pending, ImagePullBackOff, OOMKilled
+- **Service connectivity** — DNS resolution, endpoint mapping, TCP reachability
+- **Network policies** — which policies affect a pod, what traffic they block
+- **EKS-specific issues** — VPC CNI IP exhaustion, security group rules, node capacity
+- **Cluster health** — node pressure, degraded controllers, warning events
+
+Each playbook knows which kdiag commands to run, in what order, and what the output means.
+
+## Quick Start
+
+### 1. Install kdiag
+
+Download from the [Releases](https://github.com/lgbarn/kdiag/releases) page, or:
+
+```sh
+go install github.com/lgbarn/kdiag@latest
+```
+
+### 2. Install the Claude Code skill
+
+```sh
+cp skill/SKILL.md ~/.claude/skills/kdiag-SKILL.md
+```
+
+Or add it to your project's `.claude/settings.json`:
+
+```json
+{
+  "skills": ["./skill/SKILL.md"]
+}
+```
+
+### 3. Start troubleshooting
+
+Open Claude Code and describe your problem. The skill activates automatically when you mention Kubernetes issues:
+
+- "my pod is stuck in CrashLoopBackOff"
+- "I can't reach my-service from pod-a"
+- "check the health of my cluster"
+- "why is my pod pending?"
+- "are there any network policies blocking traffic?"
+
+## Using kdiag Directly
+
+You don't need Claude Code to use kdiag — every command works standalone from the terminal.
+
+### One command to check everything
+
+```sh
+kdiag diagnose my-pod -n my-namespace
+```
+
+```
+Diagnosing pod: my-namespace/my-pod
+EKS cluster: yes
+
+CHECK     SEVERITY   SUMMARY
+inspect   pass       all 2 container(s) running normally
+dns       warn       1/2 CoreDNS pod(s) not ready
+netpol    pass       3 NetworkPolicy/ies matched
+cni       pass       DaemonSet healthy; 0 node(s) with exhausted IPs
+sg        pass       4 security groups retrieved
+
+Summary: 5 total, 4 pass, 1 warn, 0 fail, 0 error, 0 skipped
+```
+
+### All commands
+
+| Command | What it does |
+|---------|-------------|
+| `kdiag diagnose <pod>` | Run all checks at once and get a severity-ranked summary |
+| `kdiag inspect <pod>` | Container states, restart counts, events, owner chain |
+| `kdiag inspect deployment/<name>` | Deployment replica status and rollout conditions |
+| `kdiag health` | Cluster-wide node and system pod health |
+| `kdiag dns <pod-or-service>` | DNS resolution test + CoreDNS health check |
+| `kdiag connectivity <src> <dst>` | TCP/HTTP reachability from one pod to another |
+| `kdiag trace <pod> <service>` | Map the full network path: pod → service → endpoints → nodes |
+| `kdiag netpol <pod>` | Which NetworkPolicies affect this pod and what they allow/block |
+| `kdiag logs <pod>` | Tail logs from a pod |
+| `kdiag logs deployment/<name>` | Tail logs from all pods in a deployment |
+| `kdiag logs -l app=myapp` | Tail logs by label selector |
+| `kdiag shell <pod>` | Drop a debug shell (netshoot) into a running pod |
+| `kdiag capture <pod>` | Live packet capture with JSON-lines, text, or pcap output |
+| `kdiag eks cni` | VPC CNI DaemonSet health + per-node IP exhaustion |
+| `kdiag eks sg <pod>` | Security groups attached to a pod's ENI |
+| `kdiag eks node` | Node metadata: instance type, AZ, ENI/IP capacity |
+
+All commands accept bare pod names (`my-pod`) or type/name format (`pod/my-pod`) — both work everywhere.
+
+Every command supports `--output json` for machine-readable output, `--namespace`, `--context`, and `--kubeconfig` flags.
 
 ## Installation
 
 ### Binary (GitHub Release)
 
-Download the latest release for your platform from the [Releases](https://github.com/lgbarn/kdiag/releases) page, or use curl (replace `VERSION` with the release version, e.g. `0.1.0`):
+Download from the [Releases](https://github.com/lgbarn/kdiag/releases) page, or use curl (replace `VERSION` with the release version, e.g. `0.1.0`):
 
 ```sh
 # macOS arm64
@@ -59,260 +155,16 @@ Expose `kdiag` as `kubectl kdiag`:
 ln -sf $(which kdiag) $(dirname $(which kdiag))/kubectl-kdiag
 ```
 
-## Quick Start
+## Works With Any Kubernetes Cluster
 
-Run all diagnostics against a pod:
+kdiag uses your standard kubeconfig, so it works wherever `kubectl` works:
 
-```sh
-kdiag diagnose my-pod -n my-namespace
-```
+- **Docker Desktop** Kubernetes
+- **kind** and **k3d** local clusters
+- **Amazon EKS** (with bonus EKS-specific commands)
+- **GKE**, **AKS**, and any conformant cluster
 
-Example output:
-
-```
-Pod: my-pod  Namespace: my-namespace  EKS: true
-
-CHECK              SEVERITY  SUMMARY
-─────────────────────────────────────────────────────────────────
-inspect            pass      all 2 container(s) running normally
-dns                warn      1/2 CoreDNS pod(s) not ready
-netpol             pass      3 NetworkPolicy/ies matched
-eks-cni            pass      DaemonSet healthy; 0 node(s) with exhausted IPs
-eks-sg             pass      4 security groups retrieved
-
-Total: 5  Pass: 4  Warn: 1  Fail: 0  Error: 0  Skipped: 0
-```
-
-## Argument Conventions
-
-All commands accept a **bare pod name** by default. You can optionally use `pod/name` syntax for clarity — both forms work everywhere:
-
-```sh
-# These are equivalent:
-kdiag inspect my-pod
-kdiag inspect pod/my-pod
-
-# inspect also supports other resource types:
-kdiag inspect deployment/my-app
-kdiag inspect daemonset/my-ds
-```
-
-## Command Reference
-
-### diagnose
-
-Run all diagnostic checks against a pod and display a severity-ranked summary.
-
-```sh
-kdiag diagnose <pod-name> [-n namespace]
-kdiag diagnose pod/my-pod [-n namespace]
-```
-
-Runs: inspect, dns, netpol, eks-cni, eks-sg (when on EKS).
-
----
-
-### inspect
-
-Show enriched resource details: owner chain, events, conditions, and container status.
-
-```sh
-kdiag inspect <name> [-n namespace] [-o table|json]
-kdiag inspect <type/name> [-n namespace] [-o table|json]
-```
-
-A bare name defaults to pod. Supported types: `pod`, `deployment`, `replicaset`, `daemonset`, `statefulset`.
-
----
-
-### dns
-
-Check CoreDNS pod health and test DNS resolution from inside a pod.
-
-```sh
-kdiag dns <pod-or-service> [-n namespace]
-```
-
----
-
-### netpol
-
-List NetworkPolicies that select a pod and summarize ingress/egress rules.
-
-```sh
-kdiag netpol <pod-name> [-n namespace]
-```
-
----
-
-### connectivity
-
-Test TCP or HTTP connectivity from a source pod to a destination pod, service, or host:port.
-
-```sh
-kdiag connectivity <source-pod> <destination> [-n namespace] [-p port] [--protocol tcp|http]
-```
-
----
-
-### health
-
-Check cluster-level health: node readiness, system pod status, and resource pressure.
-
-```sh
-kdiag health [-n kube-system]
-```
-
----
-
-### eks cni
-
-Inspect AWS VPC CNI DaemonSet health and per-node IP address exhaustion.
-
-```sh
-kdiag eks cni [-n kube-system]
-```
-
-Requires: `ec2:DescribeInstances`, `ec2:DescribeNetworkInterfaces`.
-
----
-
-### eks sg
-
-Retrieve and display security groups attached to EKS nodes or pods.
-
-```sh
-kdiag eks sg [node|pod] <name> [-n namespace]
-```
-
-Requires: `ec2:DescribeSecurityGroups`.
-
----
-
-### eks node
-
-Show EKS node metadata: instance type, availability zone, AMI, and capacity type.
-
-```sh
-kdiag eks node [node-name]
-```
-
-Requires: `ec2:DescribeInstances`, `ec2:DescribeInstanceTypes`.
-
----
-
-### shell
-
-Launch an ephemeral debug container in a running pod.
-
-```sh
-kdiag shell <pod> [-n namespace] [--image nicolaka/netshoot]
-```
-
-Requires RBAC: `pods/ephemeralcontainers` create.
-
----
-
-### capture
-
-Capture network traffic from a pod via an ephemeral debug container.
-
-By default, live output uses tshark with `-T ek` format (JSON-lines, one JSON
-object per packet) which is optimized for consumption by AI agents and log
-pipelines. Use `--format=text` for classic tcpdump output, or `--format=json`
-for a tshark JSON array. When `--write` is used, output is always raw pcap.
-
-```sh
-# AI-friendly JSON-lines (default)
-kdiag capture <pod> [-n namespace] [--filter "port 80"]
-
-# Classic tcpdump text
-kdiag capture <pod> --format text
-
-# Write pcap file
-kdiag capture <pod> -w /tmp/out.pcap
-
-# Stop after 100 packets or 30 seconds
-kdiag capture <pod> -c 100 -d 30s
-```
-
-| Flag | Short | Default | Description |
-|------|-------|---------|-------------|
-| `--filter` | `-f` | | BPF filter expression |
-| `--write` | `-w` | | Write raw pcap to file |
-| `--format` | | `ek` | Live output: `ek` (JSON-lines), `json`, `text` |
-| `--interface` | `-i` | `any` | Network interface to capture on |
-| `--count` | `-c` | `0` | Stop after N packets (0 = unlimited) |
-| `--duration` | `-d` | `0` | Stop after duration (0 = unlimited) |
-
-Requires RBAC: `pods/ephemeralcontainers` create.
-
----
-
-### logs
-
-Tail logs from a pod, deployment, or pods matching a label selector.
-
-```sh
-# By pod name
-kdiag logs <pod-name> [-n namespace]
-
-# By deployment (tails all pods)
-kdiag logs deployment/my-app [-n namespace]
-
-# By label selector
-kdiag logs -l app=myapp [-n namespace]
-```
-
-| Flag | Short | Default | Description |
-|------|-------|---------|-------------|
-| `--selector` | `-l` | | Label selector for pod matching |
-| `--filter` | | | Only show log lines containing this string |
-| `--container` | `-c` | | Specific container name to tail |
-| `--max-pods` | | `10` | Maximum concurrent pod log streams |
-
----
-
-### trace
-
-Run a network trace to diagnose latency and routing between a pod and a target.
-
-```sh
-kdiag trace <pod> <target> [-n namespace]
-```
-
----
-
-### completion
-
-Generate shell completion script.
-
-```sh
-kdiag completion bash   # or zsh, fish, powershell
-```
-
-Add to your shell profile:
-
-```sh
-# bash
-source <(kdiag completion bash)
-
-# zsh
-source <(kdiag completion zsh)
-```
-
-## Global Flags
-
-| Flag | Short | Default | Description |
-|------|-------|---------|-------------|
-| `--kubeconfig` | | `$KUBECONFIG` | Path to kubeconfig file |
-| `--context` | | current context | Kubernetes context to use |
-| `--namespace` | `-n` | default | Target namespace |
-| `--output` | `-o` | `table` | Output format: `table` or `json` |
-| `--image` | | `nicolaka/netshoot` | Debug container image |
-| `--image-pull-secret` | | | Pull secret for private registry images |
-| `--timeout` | | `30s` | Operation timeout (e.g. `30s`, `2m`) |
-| `--verbose` | `-v` | false | Enable debug logging |
+EKS commands (`eks cni`, `eks sg`, `eks node`) require AWS credentials and are automatically skipped on non-EKS clusters.
 
 ## RBAC Requirements
 
@@ -332,48 +184,14 @@ source <(kdiag completion zsh)
 | trace | create | pods/ephemeralcontainers |
 | diagnose | get, list | pods, networkpolicies, daemonsets |
 
-## IAM Requirements (EKS)
+## EKS IAM Requirements
 
-The following IAM permissions are required for `eks` subcommands:
+The `eks` subcommands need these IAM permissions on the principal running kdiag:
 
 - `ec2:DescribeInstances`
 - `ec2:DescribeNetworkInterfaces`
 - `ec2:DescribeSecurityGroups`
 - `ec2:DescribeInstanceTypes`
-
-These permissions should be granted to the IAM role associated with the node or the principal running `kdiag` (e.g., via IRSA or instance profile).
-
-## Claude Code Skill
-
-kdiag ships with a [Claude Code](https://docs.anthropic.com/en/docs/claude-code) skill that turns Claude into a Kubernetes troubleshooting assistant. It knows all kdiag commands and follows structured playbooks to diagnose pod crashes, service connectivity failures, DNS issues, and EKS-specific problems.
-
-### Install the skill
-
-Copy the skill directory into your Claude Code skills path:
-
-```sh
-cp -r skill/SKILL.md ~/.claude/skills/kdiag-SKILL.md
-```
-
-Or reference it directly in your project's `.claude/settings.json`:
-
-```json
-{
-  "skills": ["./skill/SKILL.md"]
-}
-```
-
-### Usage
-
-Once installed, just describe your issue in Claude Code and the skill activates automatically:
-
-- "my pod is stuck in CrashLoopBackOff"
-- "I can't reach my-service from pod-a"
-- "check the health of my cluster"
-- "why is my pod pending?"
-- "are there any network policies blocking traffic to my-pod?"
-
-Claude will run the appropriate kdiag commands, interpret the results, and guide you to a fix.
 
 ## License
 
