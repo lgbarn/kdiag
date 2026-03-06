@@ -1,0 +1,13 @@
+# Compiled binary
+kdiag
+*.exe
+
+# OS files
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+
+# Coverage
+coverage.out

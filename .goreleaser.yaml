@@ -44,18 +44,18 @@ changelog:
       - "^test:"
       - "^chore:"
 
-brews:
-  - name: kdiag
-    repository:
-      owner: lgbarn
-      name: homebrew-kdiag
-      branch: main
-      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
-    homepage: "https://github.com/lgbarn/kdiag"
-    description: "Kubernetes diagnostics CLI with first-class EKS support"
-    license: "MIT"
-    install: |
-      bin.install "kdiag"
-    test: |
-      system "#{bin}/kdiag", "--help"
-    skip_upload: auto
+# brews:
+#   - name: kdiag
+#     repository:
+#       owner: lgbarn
+#       name: homebrew-kdiag
+#       branch: main
+#       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+#     homepage: "https://github.com/lgbarn/kdiag"
+#     description: "Kubernetes diagnostics CLI with first-class EKS support"
+#     license: "MIT"
+#     install: |
+#       bin.install "kdiag"
+#     test: |
+#       system "#{bin}/kdiag", "--help"
+#     skip_upload: auto
