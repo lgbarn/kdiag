@@ -22,22 +22,32 @@ var (
 	captureFilter    string
 	captureOutput    string
 	captureInterface string
+	captureFormat    string
 	captureCount     int
 	captureDuration  time.Duration
 )
 
 var captureCmd = &cobra.Command{
 	Use:   "capture <pod-name>",
-	Short: "Capture network traffic from a pod using tcpdump",
-	RunE:  runCapture,
+	Short: "Capture network traffic from a pod using tshark/tcpdump",
+	Long: `Capture network traffic from a pod via an ephemeral debug container.
+
+By default, live output uses tshark with -T ek format (JSON-lines, one JSON
+object per packet) which is optimized for consumption by AI agents and log
+pipelines. Use --format=text for classic tcpdump output, or --format=json
+for a tshark JSON array.
+
+When --write is used, output is always raw pcap (openable with Wireshark).`,
+	RunE: runCapture,
 }
 
 func init() {
 	rootCmd.AddCommand(captureCmd)
 
-	captureCmd.Flags().StringVarP(&captureFilter, "filter", "f", "", "BPF filter expression for tcpdump")
-	captureCmd.Flags().StringVarP(&captureOutput, "write", "w", "", "Write raw pcap data to file path")
+	captureCmd.Flags().StringVarP(&captureFilter, "filter", "f", "", "BPF filter expression for tcpdump/tshark")
+	captureCmd.Flags().StringVarP(&captureOutput, "write", "w", "", "Write raw pcap data to file path (always pcap format)")
 	captureCmd.Flags().StringVarP(&captureInterface, "interface", "i", "any", "Network interface to capture on")
+	captureCmd.Flags().StringVar(&captureFormat, "format", "ek", "Live output format: ek (JSON-lines, AI-friendly), json (tshark JSON array), text (tcpdump text)")
 	captureCmd.Flags().IntVarP(&captureCount, "count", "c", 0, "Stop after receiving count packets (0 = unlimited)")
 	captureCmd.Flags().DurationVarP(&captureDuration, "duration", "d", 0, "Stop capture after duration (e.g. 30s, 2m; 0 = unlimited)")
 }
@@ -94,6 +104,11 @@ func runCapture(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("insufficient permissions:\n%s", msg)
 	}
 
+	// Validate --format flag.
+	if captureFormat != "ek" && captureFormat != "json" && captureFormat != "text" {
+		return fmt.Errorf("unsupported --format %q: must be ek, json, or text", captureFormat)
+	}
+
 	// Validate network interface name (IFNAMSIZ = 16 on Linux, alphanumeric + dash/dot/underscore).
 	if len(captureInterface) > 15 {
 		return fmt.Errorf("--interface value %q is too long (max 15 chars)", captureInterface)
@@ -103,25 +118,8 @@ func runCapture(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("--interface value %q contains invalid characters", captureInterface)
 	}
 
-	// Build tcpdump command.
-	tcpdumpCmd := []string{"tcpdump", "-i", captureInterface}
-
-	if captureOutput != "" {
-		// Raw pcap to stdout, packet-buffered.
-		tcpdumpCmd = append(tcpdumpCmd, "-w", "-", "-U")
-	} else {
-		// Line-buffered human-readable output.
-		tcpdumpCmd = append(tcpdumpCmd, "-l")
-	}
-
-	if captureCount > 0 {
-		tcpdumpCmd = append(tcpdumpCmd, "-c", strconv.Itoa(captureCount))
-	}
-
+	// Validate BPF filter if provided.
 	if captureFilter != "" {
-		// Defensive validation: reject null bytes and excessively long filters.
-		// The real protection against shell injection is argv execution (no shell),
-		// but we reject obviously malformed inputs early.
 		if len(captureFilter) > 1024 {
 			return fmt.Errorf("--filter value is too long (%d chars); maximum allowed is 1024", len(captureFilter))
 		}
@@ -130,13 +128,27 @@ func runCapture(cmd *cobra.Command, args []string) error {
 				return fmt.Errorf("--filter value contains a null byte, which is not allowed")
 			}
 		}
-		// BPF filter goes as trailing args.
-		tcpdumpCmd = append(tcpdumpCmd, captureFilter)
+	}
+
+	// Build capture command.
+	var capCmd []string
+
+	if captureOutput != "" {
+		// File output: always tcpdump writing pcap to stdout (piped to file).
+		capCmd = buildTcpdumpCommand(captureInterface, captureCount, captureFilter, true)
+	} else {
+		// Live terminal output: use format flag to select tool.
+		switch captureFormat {
+		case "ek", "json":
+			capCmd = buildTsharkCommand(captureInterface, captureFormat, captureCount, captureFilter)
+		default:
+			capCmd = buildTcpdumpCommand(captureInterface, captureCount, captureFilter, false)
+		}
 	}
 
 	if IsVerbose() {
 		fmt.Fprintf(os.Stderr, "[verbose] pod: %s/%s\n", namespace, podName)
-		fmt.Fprintf(os.Stderr, "[verbose] tcpdump command: %v\n", tcpdumpCmd)
+		fmt.Fprintf(os.Stderr, "[verbose] capture command: %v\n", capCmd)
 	}
 
 	// Set up context with optional duration timeout and SIGINT handler.
@@ -171,7 +183,7 @@ func runCapture(cmd *cobra.Command, args []string) error {
 		PodName:         podName,
 		Namespace:       namespace,
 		Image:           GetDebugImage(),
-		Command:         tcpdumpCmd,
+		Command:         capCmd,
 		Stdin:           false,
 		TTY:             false,
 		ImagePullSecret: GetImagePullSecret(),
@@ -246,4 +258,35 @@ func runCapture(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "Capture written to %s\n", captureOutput)
 	}
 	return nil
+}
+
+// buildTcpdumpCommand builds a tcpdump argv. When pcapToStdout is true, output
+// is raw pcap on stdout (for piping to a file); otherwise line-buffered text.
+func buildTcpdumpCommand(iface string, count int, filter string, pcapToStdout bool) []string {
+	cmd := []string{"tcpdump", "-i", iface}
+	if pcapToStdout {
+		cmd = append(cmd, "-w", "-", "-U")
+	} else {
+		cmd = append(cmd, "-l")
+	}
+	if count > 0 {
+		cmd = append(cmd, "-c", strconv.Itoa(count))
+	}
+	if filter != "" {
+		cmd = append(cmd, filter)
+	}
+	return cmd
+}
+
+// buildTsharkCommand builds a tshark argv for structured output.
+// format must be "ek" (JSON-lines, one object per packet) or "json" (JSON array).
+func buildTsharkCommand(iface, format string, count int, filter string) []string {
+	cmd := []string{"tshark", "-i", iface, "-T", format, "-l"}
+	if count > 0 {
+		cmd = append(cmd, "-c", strconv.Itoa(count))
+	}
+	if filter != "" {
+		cmd = append(cmd, "-f", filter)
+	}
+	return cmd
 }
