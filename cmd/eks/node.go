@@ -179,13 +179,16 @@ func runNode(cmd *cobra.Command, args []string) error {
 		}
 
 		limits := limitsMap[en.instanceType]
-		var maxENIs, maxIPsPerENI int32
-		var maxTotalIPs int
-		if limits != nil {
-			maxENIs = limits.MaxENIs
-			maxIPsPerENI = limits.MaxIPsPerENI
-			maxTotalIPs = int(maxENIs) * int(maxIPsPerENI)
+		if limits == nil {
+			report.Skipped = append(report.Skipped, SkippedNode{
+				NodeName: en.name,
+				Reason:   fmt.Sprintf("instance type limits not available for %s", en.instanceType),
+			})
+			continue
 		}
+		maxENIs := limits.MaxENIs
+		maxIPsPerENI := limits.MaxIPsPerENI
+		maxTotalIPs := int(maxENIs) * int(maxIPsPerENI)
 
 		currentENIs := len(eniInfo.ENIs)
 		currentIPs := eniInfo.TotalIPs
@@ -226,12 +229,11 @@ func runNode(cmd *cobra.Command, args []string) error {
 	report.Summary.SkippedNodes = len(report.Skipped)
 
 	// 11. Output.
-	outFmt := getOutputFormat()
-	if outFmt == "json" {
-		jp, err := output.NewJSONPrinter(os.Stdout)
-		if err != nil {
-			return err
-		}
+	printer, err := output.NewPrinter(getOutputFormat(), os.Stdout)
+	if err != nil {
+		return fmt.Errorf("unsupported output format: %w", err)
+	}
+	if jp, ok := printer.(*output.JSONPrinter); ok {
 		return jp.Print(report)
 	}
 

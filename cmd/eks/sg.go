@@ -68,9 +68,9 @@ func runSG(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to get pod %q in namespace %q: %w", podName, namespace, err)
 	}
 
-	// Fargate check: pods with no NodeName run on Fargate virtual nodes.
-	if pod.Spec.NodeName == "" {
-		return fmt.Errorf("pod %q appears to be a Fargate pod (no node assigned); "+
+	// Fargate check: use label-aware detection to identify Fargate pods.
+	if k8s.DetectComputeType(pod) == k8s.ComputeTypeFargate {
+		return fmt.Errorf("pod %q appears to be a Fargate pod; "+
 			"Fargate pods manage networking outside EC2 ENIs and are not supported by this command", podName)
 	}
 
@@ -146,6 +146,15 @@ func runSG(cmd *cobra.Command, args []string) error {
 	return printSGTable(report)
 }
 
+// formatPortRange returns display strings for FROM and TO port columns.
+// All-traffic rules (protocol "all" or both ports zero) are shown as "*".
+func formatPortRange(protocol string, from, to int32) (string, string) {
+	if protocol == "all" || (from == 0 && to == 0) {
+		return "*", "*"
+	}
+	return fmt.Sprintf("%d", from), fmt.Sprintf("%d", to)
+}
+
 // printSGTable renders the SGReport as structured human-readable table output.
 func printSGTable(r SGReport) error {
 	fmt.Fprintf(os.Stdout, "Pod:       %s/%s\n", r.Namespace, r.PodName)
@@ -183,10 +192,11 @@ func printSGTable(r SGReport) error {
 					}
 					source += strings.Join(rule.SourceGroups, ",")
 				}
+				fromPort, toPort := formatPortRange(rule.Protocol, rule.FromPort, rule.ToPort)
 				ingressPrinter.PrintRow(
 					"    "+rule.Protocol,
-					fmt.Sprintf("%d", rule.FromPort),
-					fmt.Sprintf("%d", rule.ToPort),
+					fromPort,
+					toPort,
 					source,
 					rule.Description,
 				)
@@ -214,10 +224,11 @@ func printSGTable(r SGReport) error {
 					}
 					dest += strings.Join(rule.SourceGroups, ",")
 				}
+				fromPort, toPort := formatPortRange(rule.Protocol, rule.FromPort, rule.ToPort)
 				egressPrinter.PrintRow(
 					"    "+rule.Protocol,
-					fmt.Sprintf("%d", rule.FromPort),
-					fmt.Sprintf("%d", rule.ToPort),
+					fromPort,
+					toPort,
 					dest,
 					rule.Description,
 				)

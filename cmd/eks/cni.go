@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"strconv"
-	"strings"
 
 	"github.com/spf13/cobra"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -17,11 +16,11 @@ import (
 
 // CNIReport is the top-level JSON report for kdiag eks cni.
 type CNIReport struct {
-	DaemonSet    DaemonSetStatus `json:"daemonset"`
-	Config       CNIConfig       `json:"config"`
-	Nodes        []NodeCapacity  `json:"nodes"`
-	Skipped      []SkippedNode   `json:"skipped_nodes"`
-	ExhaustedCnt int             `json:"exhausted_nodes"`
+	DaemonSet   DaemonSetStatus `json:"daemonset"`
+	Config      CNIConfig       `json:"config"`
+	Nodes       []NodeCapacity  `json:"nodes"`
+	Skipped     []SkippedNode   `json:"skipped_nodes"`
+	IPExhausted []string        `json:"ip_exhausted_nodes"`
 }
 
 // DaemonSetStatus holds the aws-node DaemonSet status fields.
@@ -29,17 +28,18 @@ type DaemonSetStatus struct {
 	Desired int32 `json:"desired"`
 	Ready   int32 `json:"ready"`
 	Updated int32 `json:"updated"`
+	Healthy bool  `json:"healthy"`
 }
 
 // CNIConfig holds the relevant env-var configuration extracted from the
 // aws-node DaemonSet container.
 type CNIConfig struct {
-	EnablePrefixDelegation string `json:"enable_prefix_delegation"`
-	EnablePodENI           string `json:"enable_pod_eni"`
-	WarmIPTarget           string `json:"warm_ip_target"`
-	WarmENITarget          string `json:"warm_eni_target"`
-	WarmPrefixTarget       string `json:"warm_prefix_target"`
-	MinimumIPTarget        string `json:"minimum_ip_target"`
+	PrefixDelegation bool   `json:"prefix_delegation"`
+	PodENI           bool   `json:"pod_eni"`
+	WarmIPTarget     string `json:"warm_ip_target"`
+	WarmENITarget    string `json:"warm_eni_target"`
+	WarmPrefixTarget string `json:"warm_prefix_target"`
+	MinimumIPTarget  string `json:"minimum_ip_target"`
 }
 
 // NodeCapacity holds per-node ENI/IP capacity data.
@@ -49,6 +49,7 @@ type NodeCapacity struct {
 	MaxENIs      int32  `json:"max_enis"`
 	MaxIPsPerENI int32  `json:"max_ips_per_eni"`
 	MaxTotalIPs  int    `json:"max_total_ips"`
+	CurrentENIs  int    `json:"current_enis"`
 	CurrentIPs   int    `json:"current_ips"`
 	Utilization  string `json:"utilization_pct"`
 	Exhausted    bool   `json:"exhausted"`
@@ -92,6 +93,7 @@ func runCNI(cmd *cobra.Command, args []string) error {
 		Desired: ds.Status.DesiredNumberScheduled,
 		Ready:   ds.Status.NumberReady,
 		Updated: ds.Status.UpdatedNumberScheduled,
+		Healthy: ds.Status.NumberReady == ds.Status.DesiredNumberScheduled,
 	}
 
 	// Extract env vars from the aws-node container.
@@ -103,9 +105,9 @@ func runCNI(cmd *cobra.Command, args []string) error {
 		for _, env := range container.Env {
 			switch env.Name {
 			case "ENABLE_PREFIX_DELEGATION":
-				cniConfig.EnablePrefixDelegation = env.Value
+				cniConfig.PrefixDelegation = env.Value == "true"
 			case "ENABLE_POD_ENI":
-				cniConfig.EnablePodENI = env.Value
+				cniConfig.PodENI = env.Value == "true"
 			case "WARM_IP_TARGET":
 				cniConfig.WarmIPTarget = env.Value
 			case "WARM_ENI_TARGET":
@@ -131,7 +133,7 @@ func runCNI(cmd *cobra.Command, args []string) error {
 	}
 
 	// Determine if prefix delegation is enabled.
-	prefixDelegation := strings.EqualFold(cniConfig.EnablePrefixDelegation, "true")
+	prefixDelegation := cniConfig.PrefixDelegation
 
 	type eligibleNode struct {
 		name         string
@@ -194,7 +196,7 @@ func runCNI(cmd *cobra.Command, args []string) error {
 
 	// 7. Per-node ENI query and utilization calculation.
 	var nodes []NodeCapacity
-	exhaustedCnt := 0
+	var ipExhausted []string
 
 	for _, en := range eligible {
 		eniInfo, err := awspkg.ListNodeENIs(ctx, ec2Client, en.instanceID)
@@ -224,6 +226,7 @@ func runCNI(cmd *cobra.Command, args []string) error {
 			}
 		}
 
+		currentENIs := len(eniInfo.ENIs)
 		currentIPs := eniInfo.TotalIPs
 
 		utilPct := 0
@@ -234,7 +237,7 @@ func runCNI(cmd *cobra.Command, args []string) error {
 		// Exhausted if >= 85%.
 		exhausted := utilPct >= 85
 		if exhausted {
-			exhaustedCnt++
+			ipExhausted = append(ipExhausted, en.name)
 		}
 
 		nodes = append(nodes, NodeCapacity{
@@ -243,6 +246,7 @@ func runCNI(cmd *cobra.Command, args []string) error {
 			MaxENIs:      maxENIs,
 			MaxIPsPerENI: maxIPsPerENI,
 			MaxTotalIPs:  maxTotalIPs,
+			CurrentENIs:  currentENIs,
 			CurrentIPs:   currentIPs,
 			Utilization:  strconv.Itoa(utilPct),
 			Exhausted:    exhausted,
@@ -251,11 +255,11 @@ func runCNI(cmd *cobra.Command, args []string) error {
 
 	// 9. Build CNIReport.
 	report := CNIReport{
-		DaemonSet:    dsStatus,
-		Config:       cniConfig,
-		Nodes:        nodes,
-		Skipped:      skipped,
-		ExhaustedCnt: exhaustedCnt,
+		DaemonSet:   dsStatus,
+		Config:      cniConfig,
+		Nodes:       nodes,
+		Skipped:     skipped,
+		IPExhausted: ipExhausted,
 	}
 
 	// 10. Output.
@@ -292,8 +296,8 @@ func printCNITable(r CNIReport, prefixDelegation bool) error {
 	fmt.Fprintln(os.Stdout, "=== VPC CNI Configuration ===")
 	cfgPrinter := output.NewTablePrinter(os.Stdout)
 	cfgPrinter.PrintHeader("SETTING", "VALUE")
-	cfgPrinter.PrintRow("ENABLE_PREFIX_DELEGATION", r.Config.EnablePrefixDelegation)
-	cfgPrinter.PrintRow("ENABLE_POD_ENI", r.Config.EnablePodENI)
+	cfgPrinter.PrintRow("ENABLE_PREFIX_DELEGATION", strconv.FormatBool(r.Config.PrefixDelegation))
+	cfgPrinter.PrintRow("ENABLE_POD_ENI", strconv.FormatBool(r.Config.PodENI))
 	cfgPrinter.PrintRow("WARM_IP_TARGET", r.Config.WarmIPTarget)
 	cfgPrinter.PrintRow("WARM_ENI_TARGET", r.Config.WarmENITarget)
 	cfgPrinter.PrintRow("WARM_PREFIX_TARGET", r.Config.WarmPrefixTarget)
@@ -310,11 +314,11 @@ func printCNITable(r CNIReport, prefixDelegation bool) error {
 	}
 	fmt.Fprintf(os.Stdout, "=== Node IP Capacity%s ===\n", prefixNote)
 	nodePrinter := output.NewTablePrinter(os.Stdout)
-	nodePrinter.PrintHeader("NODE", "INSTANCE_TYPE", "MAX_ENIS", "MAX_IPS/ENI", "MAX_IPS", "CURRENT_IPS", "UTIL%", "EXHAUSTED")
+	nodePrinter.PrintHeader("NODE", "INSTANCE_TYPE", "MAX_ENIS", "MAX_IPS/ENI", "MAX_IPS", "CURRENT_IPS", "UTIL%", "STATUS")
 	for _, n := range r.Nodes {
-		exhausted := "false"
+		status := "OK"
 		if n.Exhausted {
-			exhausted = "true"
+			status = "EXHAUSTED"
 		}
 		nodePrinter.PrintRow(
 			n.NodeName,
@@ -324,7 +328,7 @@ func printCNITable(r CNIReport, prefixDelegation bool) error {
 			strconv.Itoa(n.MaxTotalIPs),
 			strconv.Itoa(n.CurrentIPs),
 			n.Utilization+"%",
-			exhausted,
+			status,
 		)
 	}
 	if err := nodePrinter.Flush(); err != nil {
@@ -345,7 +349,7 @@ func printCNITable(r CNIReport, prefixDelegation bool) error {
 	}
 
 	fmt.Fprintf(os.Stdout, "\n%d nodes checked, %d exhausted, %d skipped\n",
-		len(r.Nodes), r.ExhaustedCnt, len(r.Skipped))
+		len(r.Nodes), len(r.IPExhausted), len(r.Skipped))
 
 	return nil
 }
