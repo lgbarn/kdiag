@@ -36,12 +36,6 @@ type NodeENIStatus struct {
 	Note         string `json:"note,omitempty"`
 }
 
-// SkippedNode records a node that was excluded from the report with a reason.
-type SkippedNode struct {
-	NodeName string `json:"node_name"`
-	Reason   string `json:"reason"`
-}
-
 // NodeSummaryInfo holds aggregate counts for the report.
 type NodeSummaryInfo struct {
 	TotalNodes     int `json:"total_nodes"`
@@ -153,10 +147,7 @@ func runNode(cmd *cobra.Command, args []string) error {
 	}
 
 	// 7. Batch-query instance type limits.
-	typeList := make([]string, 0, len(uniqueTypes))
-	for t := range uniqueTypes {
-		typeList = append(typeList, t)
-	}
+	typeList := uniqueKeys(uniqueTypes)
 
 	limitsMap, err := awspkg.GetInstanceTypeLimits(ctx, ec2Client, typeList)
 	if err != nil {
@@ -258,15 +249,8 @@ func runNode(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if len(report.Skipped) > 0 {
-		skippedPrinter := output.NewTablePrinter(os.Stdout)
-		skippedPrinter.PrintHeader("NODE", "REASON")
-		for _, s := range report.Skipped {
-			skippedPrinter.PrintRow(s.NodeName, s.Reason)
-		}
-		if err := skippedPrinter.Flush(); err != nil {
-			return err
-		}
+	if err := printSkippedNodes(report.Skipped); err != nil {
+		return err
 	}
 
 	atRisk := report.Summary.ExhaustedNodes

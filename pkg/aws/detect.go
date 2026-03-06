@@ -6,9 +6,12 @@ import (
 	"strings"
 )
 
-// IsEKSCluster returns true when host looks like an EKS API server endpoint.
+// IsEKSCluster returns true when host is a structurally valid EKS API server endpoint.
+// It delegates to RegionFromHost so that substring-only matches (e.g. spoofed hostnames)
+// are rejected; a host is accepted only when the full EKS segment structure is parseable.
 func IsEKSCluster(host string) bool {
-	return strings.Contains(host, ".eks.amazonaws.com")
+	_, err := RegionFromHost(host)
+	return err == nil
 }
 
 // RegionFromHost extracts the AWS region from an EKS API server endpoint URL.

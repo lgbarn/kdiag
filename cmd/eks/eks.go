@@ -10,6 +10,7 @@ import (
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 
 	awspkg "github.com/lgbarn/kdiag/pkg/aws"
+	"github.com/lgbarn/kdiag/pkg/output"
 )
 
 var (
@@ -104,8 +105,33 @@ func newEC2Client(ctx context.Context, host string) (awspkg.EC2API, error) {
 	return awspkg.NewEC2Client(ctx, region, awsProfile)
 }
 
-// Ensure unexported helpers are referenced so the compiler does not complain.
-var _ = getOutputFormat
-var _ = getTimeout
-var _ = isVerbose
-var _ = newEC2Client
+// SkippedNode records a node that was excluded from a report with a reason.
+type SkippedNode struct {
+	NodeName string `json:"node_name"`
+	Reason   string `json:"reason"`
+}
+
+// uniqueKeys returns a slice of all keys from a map[string]struct{}.
+func uniqueKeys(m map[string]struct{}) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+// printSkippedNodes renders a skipped-nodes table to stdout.
+func printSkippedNodes(skipped []SkippedNode) error {
+	if len(skipped) == 0 {
+		return nil
+	}
+	fmt.Fprintln(os.Stdout)
+	fmt.Fprintln(os.Stdout, "=== Skipped Nodes ===")
+	p := output.NewTablePrinter(os.Stdout)
+	p.PrintHeader("NODE", "REASON")
+	for _, s := range skipped {
+		p.PrintRow(s.NodeName, s.Reason)
+	}
+	return p.Flush()
+}
+

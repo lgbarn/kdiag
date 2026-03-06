@@ -184,10 +184,7 @@ func runCNI(cmd *cobra.Command, args []string) error {
 	}
 
 	// 6. Batch query instance type limits.
-	typeList := make([]string, 0, len(uniqueTypes))
-	for t := range uniqueTypes {
-		typeList = append(typeList, t)
-	}
+	typeList := uniqueKeys(uniqueTypes)
 
 	limitsMap, err := awspkg.GetInstanceTypeLimits(ctx, ec2Client, typeList)
 	if err != nil {
@@ -263,12 +260,11 @@ func runCNI(cmd *cobra.Command, args []string) error {
 	}
 
 	// 10. Output.
-	outFmt := getOutputFormat()
-	if outFmt == "json" {
-		jp, err := output.NewJSONPrinter(os.Stdout)
-		if err != nil {
-			return err
-		}
+	printer, err := output.NewPrinter(getOutputFormat(), os.Stdout)
+	if err != nil {
+		return fmt.Errorf("unsupported output format: %w", err)
+	}
+	if jp, ok := printer.(*output.JSONPrinter); ok {
 		return jp.Print(report)
 	}
 
@@ -335,17 +331,8 @@ func printCNITable(r CNIReport, prefixDelegation bool) error {
 		return err
 	}
 
-	if len(r.Skipped) > 0 {
-		fmt.Fprintln(os.Stdout)
-		fmt.Fprintln(os.Stdout, "=== Skipped Nodes ===")
-		skippedPrinter := output.NewTablePrinter(os.Stdout)
-		skippedPrinter.PrintHeader("NODE", "REASON")
-		for _, s := range r.Skipped {
-			skippedPrinter.PrintRow(s.NodeName, s.Reason)
-		}
-		if err := skippedPrinter.Flush(); err != nil {
-			return err
-		}
+	if err := printSkippedNodes(r.Skipped); err != nil {
+		return err
 	}
 
 	fmt.Fprintf(os.Stdout, "\n%d nodes checked, %d exhausted, %d skipped\n",
