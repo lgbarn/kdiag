@@ -48,7 +48,7 @@ func runDiagnose(cmd *cobra.Command, args []string) error {
 	inspectResult, err := inspectPod(ctx, client, namespace, podName)
 	if err != nil {
 		report.Checks = append(report.Checks, DiagnoseCheckResult{
-			Name: "inspect", Severity: "error",
+			Name: "inspect", Severity: SeverityError,
 			Summary: "pod inspection failed", Error: err.Error(),
 		})
 	} else {
@@ -64,7 +64,7 @@ func runDiagnose(cmd *cobra.Command, args []string) error {
 	})
 	if err != nil {
 		report.Checks = append(report.Checks, DiagnoseCheckResult{
-			Name: "dns", Severity: "error",
+			Name: "dns", Severity: SeverityError,
 			Summary: "failed to list CoreDNS pods", Error: err.Error(),
 		})
 	} else {
@@ -79,21 +79,21 @@ func runDiagnose(cmd *cobra.Command, args []string) error {
 	pod, podErr := client.Clientset.CoreV1().Pods(namespace).Get(ctx, podName, metav1.GetOptions{})
 	if podErr != nil {
 		report.Checks = append(report.Checks, DiagnoseCheckResult{
-			Name: "netpol", Severity: "error",
+			Name: "netpol", Severity: SeverityError,
 			Summary: "failed to get pod for network policy check", Error: podErr.Error(),
 		})
 	} else {
 		policies, listErr := client.Clientset.NetworkingV1().NetworkPolicies(namespace).List(ctx, metav1.ListOptions{})
 		if listErr != nil {
 			report.Checks = append(report.Checks, DiagnoseCheckResult{
-				Name: "netpol", Severity: "error",
+				Name: "netpol", Severity: SeverityError,
 				Summary: "failed to list NetworkPolicies", Error: listErr.Error(),
 			})
 		} else {
 			matched, matchErr := netpol.MatchingPolicies(policies.Items, pod.Labels)
 			if matchErr != nil {
 				report.Checks = append(report.Checks, DiagnoseCheckResult{
-					Name: "netpol", Severity: "error",
+					Name: "netpol", Severity: SeverityError,
 					Summary: "failed to evaluate NetworkPolicies", Error: matchErr.Error(),
 				})
 			} else {
@@ -121,15 +121,15 @@ func runDiagnose(cmd *cobra.Command, args []string) error {
 		ec2Client, ec2Err := awspkg.NewEC2Client(ctx, region, "")
 		if ec2Err != nil {
 			report.Checks = append(report.Checks,
-				DiagnoseCheckResult{Name: "cni", Severity: "error", Summary: "failed to create EC2 client", Error: ec2Err.Error()},
-				DiagnoseCheckResult{Name: "sg", Severity: "error", Summary: "failed to create EC2 client", Error: ec2Err.Error()},
+				DiagnoseCheckResult{Name: "cni", Severity: SeverityError, Summary: "failed to create EC2 client", Error: ec2Err.Error()},
+				DiagnoseCheckResult{Name: "sg", Severity: SeverityError, Summary: "failed to create EC2 client", Error: ec2Err.Error()},
 			)
 		} else {
 			// EKS CNI check.
 			ds, dsErr := client.Clientset.AppsV1().DaemonSets("kube-system").Get(ctx, "aws-node", metav1.GetOptions{})
 			if dsErr != nil {
 				report.Checks = append(report.Checks, DiagnoseCheckResult{
-					Name: "cni", Severity: "error",
+					Name: "cni", Severity: SeverityError,
 					Summary: "failed to get aws-node DaemonSet", Error: dsErr.Error(),
 				})
 			} else {
@@ -137,36 +137,43 @@ func runDiagnose(cmd *cobra.Command, args []string) error {
 				nodeList, nodeErr := client.Clientset.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
 				if nodeErr != nil {
 					report.Checks = append(report.Checks, DiagnoseCheckResult{
-						Name: "cni", Severity: "error",
+						Name: "cni", Severity: SeverityError,
 						Summary: "failed to list nodes", Error: nodeErr.Error(),
 					})
 				} else {
-					exhaustedCount := countExhaustedNodes(ctx, ec2Client, nodeList.Items)
-					sev, sum := cniSeverity(dsHealthy, exhaustedCount)
-					report.Checks = append(report.Checks, DiagnoseCheckResult{
-						Name: "cni", Severity: sev, Summary: sum,
-					})
+					exhaustedCount, countErr := countExhaustedNodes(ctx, ec2Client, nodeList.Items)
+					if countErr != nil {
+						report.Checks = append(report.Checks, DiagnoseCheckResult{
+							Name: "cni", Severity: SeverityError,
+							Summary: "failed to count exhausted nodes", Error: countErr.Error(),
+						})
+					} else {
+						sev, sum := cniSeverity(dsHealthy, exhaustedCount)
+						report.Checks = append(report.Checks, DiagnoseCheckResult{
+							Name: "cni", Severity: sev, Summary: sum,
+						})
+					}
 				}
 			}
 
 			// EKS SG check: reuse pod fetched above for the netpol check.
 			if pod == nil {
 				report.Checks = append(report.Checks, DiagnoseCheckResult{
-					Name: "sg", Severity: "error",
+					Name: "sg", Severity: SeverityError,
 					Summary: "failed to get pod for SG check", Error: podErr.Error(),
 				})
 			} else {
 				sgIDs, sgErr := eks.ResolveENISGs(ctx, client, ec2Client, pod)
 				if sgErr != nil {
 					report.Checks = append(report.Checks, DiagnoseCheckResult{
-						Name: "sg", Severity: "error",
+						Name: "sg", Severity: SeverityError,
 						Summary: "failed to determine security groups", Error: sgErr.Error(),
 					})
 				} else {
 					sgs, detailErr := awspkg.GetSecurityGroupDetails(ctx, ec2Client, sgIDs)
 					if detailErr != nil {
 						report.Checks = append(report.Checks, DiagnoseCheckResult{
-							Name: "sg", Severity: "error",
+							Name: "sg", Severity: SeverityError,
 							Summary: "failed to get security group details", Error: detailErr.Error(),
 						})
 					} else {
@@ -180,8 +187,8 @@ func runDiagnose(cmd *cobra.Command, args []string) error {
 		}
 	} else {
 		report.Checks = append(report.Checks,
-			DiagnoseCheckResult{Name: "cni", Severity: "skipped", Summary: "not an EKS cluster"},
-			DiagnoseCheckResult{Name: "sg", Severity: "skipped", Summary: "not an EKS cluster"},
+			DiagnoseCheckResult{Name: "cni", Severity: SeveritySkipped, Summary: "not an EKS cluster"},
+			DiagnoseCheckResult{Name: "sg", Severity: SeveritySkipped, Summary: "not an EKS cluster"},
 		)
 	}
 
@@ -222,11 +229,11 @@ func printDiagnoseTable(report DiagnoseReport) error {
 	for _, check := range report.Checks {
 		var sevStr string
 		switch check.Severity {
-		case "pass":
-			sevStr = color.GreenString("pass")
-		case "warn":
-			sevStr = color.YellowString("warn")
-		case "fail", "error":
+		case SeverityPass:
+			sevStr = color.GreenString(SeverityPass)
+		case SeverityWarn:
+			sevStr = color.YellowString(SeverityWarn)
+		case SeverityFail, SeverityError:
 			sevStr = color.RedString(check.Severity)
 		default:
 			sevStr = check.Severity
@@ -252,7 +259,7 @@ func printDiagnoseTable(report DiagnoseReport) error {
 
 // countExhaustedNodes iterates nodes, queries ENI usage per node, and returns
 // the count of nodes with IP utilization at or above 85%.
-func countExhaustedNodes(ctx context.Context, ec2Client awspkg.EC2API, nodes []corev1.Node) int {
+func countExhaustedNodes(ctx context.Context, ec2Client awspkg.EC2API, nodes []corev1.Node) (int, error) {
 	eligible, _ := eks.ClassifyNodes(nodes)
 
 	uniqueTypes := map[string]struct{}{}
@@ -267,7 +274,7 @@ func countExhaustedNodes(ctx context.Context, ec2Client awspkg.EC2API, nodes []c
 
 	limitsMap, err := awspkg.GetInstanceTypeLimits(ctx, ec2Client, typeList)
 	if err != nil {
-		return 0
+		return 0, fmt.Errorf("failed to get instance type limits: %w", err)
 	}
 
 	exhausted := 0
@@ -289,6 +296,6 @@ func countExhaustedNodes(ctx context.Context, ec2Client awspkg.EC2API, nodes []c
 			exhausted++
 		}
 	}
-	return exhausted
+	return exhausted, nil
 }
 

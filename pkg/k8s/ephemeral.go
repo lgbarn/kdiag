@@ -119,7 +119,6 @@ type EphemeralExecOpts struct {
 	Command         []string // command to exec inside the container (not the container entrypoint)
 	Stdout          io.Writer
 	Stderr          io.Writer
-	Verbose         bool
 }
 
 // RunInEphemeralContainer encapsulates the common 5-step ephemeral container

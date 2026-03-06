@@ -22,21 +22,21 @@ func TestComputeSummary(t *testing.T) {
 		{
 			name: "mixed severities",
 			checks: []DiagnoseCheckResult{
-				{Severity: "pass"},
-				{Severity: "pass"},
-				{Severity: "warn"},
-				{Severity: "fail"},
-				{Severity: "error"},
-				{Severity: "skipped"},
+				{Severity: SeverityPass},
+				{Severity: SeverityPass},
+				{Severity: SeverityWarn},
+				{Severity: SeverityFail},
+				{Severity: SeverityError},
+				{Severity: SeveritySkipped},
 			},
 			want: DiagnoseSummary{Total: 6, Pass: 2, Warn: 1, Fail: 1, Error: 1, Skipped: 1},
 		},
 		{
 			name: "all pass",
 			checks: []DiagnoseCheckResult{
-				{Severity: "pass"},
-				{Severity: "pass"},
-				{Severity: "pass"},
+				{Severity: SeverityPass},
+				{Severity: SeverityPass},
+				{Severity: SeverityPass},
 			},
 			want: DiagnoseSummary{Total: 3, Pass: 3},
 		},
@@ -67,7 +67,7 @@ func TestInspectSeverity(t *testing.T) {
 					{Name: "sidecar", State: "Running", RestartCount: 0},
 				},
 			},
-			wantSeverity: "pass",
+			wantSeverity: SeverityPass,
 			wantContains: "running",
 		},
 		{
@@ -77,7 +77,7 @@ func TestInspectSeverity(t *testing.T) {
 					{Name: "app", State: "Waiting", StateDetail: "CrashLoopBackOff"},
 				},
 			},
-			wantSeverity: "fail",
+			wantSeverity: SeverityFail,
 			wantContains: "CrashLoopBackOff",
 		},
 		{
@@ -87,7 +87,7 @@ func TestInspectSeverity(t *testing.T) {
 					{Name: "app", State: "Terminated", StateDetail: "OOMKilled"},
 				},
 			},
-			wantSeverity: "fail",
+			wantSeverity: SeverityFail,
 			wantContains: "Terminated",
 		},
 		{
@@ -97,7 +97,7 @@ func TestInspectSeverity(t *testing.T) {
 					{Name: "app", State: "Running", RestartCount: 3},
 				},
 			},
-			wantSeverity: "warn",
+			wantSeverity: SeverityWarn,
 			wantContains: "3 restarts",
 		},
 		{
@@ -105,7 +105,7 @@ func TestInspectSeverity(t *testing.T) {
 			result: &InspectResult{
 				Containers: []ContainerSummary{},
 			},
-			wantSeverity: "pass",
+			wantSeverity: SeverityPass,
 			wantContains: "non-pod",
 		},
 	}
@@ -136,7 +136,7 @@ func TestCorednsSeverity(t *testing.T) {
 				{Name: "coredns-1", Ready: true},
 				{Name: "coredns-2", Ready: true},
 			},
-			wantSeverity: "pass",
+			wantSeverity: SeverityPass,
 			wantContains: "2",
 		},
 		{
@@ -145,13 +145,13 @@ func TestCorednsSeverity(t *testing.T) {
 				{Name: "coredns-1", Ready: true},
 				{Name: "coredns-2", Ready: false},
 			},
-			wantSeverity: "warn",
+			wantSeverity: SeverityWarn,
 			wantContains: "coredns-2",
 		},
 		{
 			name:         "zero pods returns fail",
 			pods:         []dns.CoreDNSPod{},
-			wantSeverity: "fail",
+			wantSeverity: SeverityFail,
 			wantContains: "no CoreDNS",
 		},
 	}
@@ -179,7 +179,7 @@ func TestNetpolSeverity(t *testing.T) {
 		{
 			name:         "zero policies returns pass with 0",
 			result:       netpol.NetpolResult{Pod: "myapp", Policies: []netpol.PolicySummary{}},
-			wantSeverity: "pass",
+			wantSeverity: SeverityPass,
 			wantContains: "0",
 		},
 		{
@@ -192,7 +192,7 @@ func TestNetpolSeverity(t *testing.T) {
 					{Name: "allow-dns"},
 				},
 			},
-			wantSeverity: "pass",
+			wantSeverity: SeverityPass,
 			wantContains: "3",
 		},
 	}
@@ -222,28 +222,28 @@ func TestCniSeverity(t *testing.T) {
 			name:         "healthy ds no exhausted returns pass",
 			dsHealthy:    true,
 			exhausted:    0,
-			wantSeverity: "pass",
+			wantSeverity: SeverityPass,
 			wantContains: "0",
 		},
 		{
 			name:         "unhealthy ds no exhausted returns warn",
 			dsHealthy:    false,
 			exhausted:    0,
-			wantSeverity: "warn",
+			wantSeverity: SeverityWarn,
 			wantContains: "DaemonSet",
 		},
 		{
 			name:         "healthy ds with exhausted returns fail",
 			dsHealthy:    true,
 			exhausted:    2,
-			wantSeverity: "fail",
+			wantSeverity: SeverityFail,
 			wantContains: "2",
 		},
 		{
 			name:         "unhealthy ds with exhausted returns fail (fail takes precedence)",
 			dsHealthy:    false,
 			exhausted:    1,
-			wantSeverity: "fail",
+			wantSeverity: SeverityFail,
 			wantContains: "1",
 		},
 	}
@@ -271,13 +271,13 @@ func TestSgSeverity(t *testing.T) {
 		{
 			name:         "three security groups returns pass",
 			sgCount:      3,
-			wantSeverity: "pass",
+			wantSeverity: SeverityPass,
 			wantContains: "3",
 		},
 		{
 			name:         "zero security groups returns pass",
 			sgCount:      0,
-			wantSeverity: "pass",
+			wantSeverity: SeverityPass,
 			wantContains: "0",
 		},
 	}

@@ -12,6 +12,15 @@ import (
 // ErrDiagnoseFail is returned when one or more diagnose checks fail.
 var ErrDiagnoseFail = errors.New("diagnose: one or more checks failed")
 
+// Severity constants for diagnostic check results.
+const (
+	SeverityPass    = "pass"
+	SeverityWarn    = "warn"
+	SeverityFail    = "fail"
+	SeverityError   = "error"
+	SeveritySkipped = "skipped"
+)
+
 // DiagnoseReport is the top-level structured result for the diagnose command.
 type DiagnoseReport struct {
 	Pod       string                `json:"pod"`
@@ -44,15 +53,15 @@ func computeSummary(checks []DiagnoseCheckResult) DiagnoseSummary {
 	s := DiagnoseSummary{Total: len(checks)}
 	for _, c := range checks {
 		switch c.Severity {
-		case "pass":
+		case SeverityPass:
 			s.Pass++
-		case "warn":
+		case SeverityWarn:
 			s.Warn++
-		case "fail":
+		case SeverityFail:
 			s.Fail++
-		case "error":
+		case SeverityError:
 			s.Error++
-		case "skipped":
+		case SeveritySkipped:
 			s.Skipped++
 		}
 	}
@@ -64,7 +73,7 @@ func computeSummary(checks []DiagnoseCheckResult) DiagnoseSummary {
 // Terminated state, "warn" if any container has restarts, and "pass" otherwise.
 func inspectSeverity(result *InspectResult) (severity, summary string) {
 	if len(result.Containers) == 0 {
-		return "pass", "no containers (non-pod resource)"
+		return SeverityPass, "no containers (non-pod resource)"
 	}
 
 	var failing []string
@@ -82,19 +91,19 @@ func inspectSeverity(result *InspectResult) (severity, summary string) {
 	}
 
 	if len(failing) > 0 {
-		return "fail", fmt.Sprintf("containers failing: %s", strings.Join(failing, ", "))
+		return SeverityFail, fmt.Sprintf("containers failing: %s", strings.Join(failing, ", "))
 	}
 	if len(restarting) > 0 {
-		return "warn", fmt.Sprintf("containers restarting: %s", strings.Join(restarting, ", "))
+		return SeverityWarn, fmt.Sprintf("containers restarting: %s", strings.Join(restarting, ", "))
 	}
-	return "pass", fmt.Sprintf("all %d container(s) running normally", len(result.Containers))
+	return SeverityPass, fmt.Sprintf("all %d container(s) running normally", len(result.Containers))
 }
 
 // corednsSeverity derives a severity and summary from a list of CoreDNS pods.
 // Returns "fail" if no pods found, "warn" if any pod is not ready, "pass" otherwise.
 func corednsSeverity(pods []dns.CoreDNSPod) (severity, summary string) {
 	if len(pods) == 0 {
-		return "fail", "no CoreDNS pods found"
+		return SeverityFail, "no CoreDNS pods found"
 	}
 
 	var notReady []string
@@ -105,15 +114,15 @@ func corednsSeverity(pods []dns.CoreDNSPod) (severity, summary string) {
 	}
 
 	if len(notReady) > 0 {
-		return "warn", fmt.Sprintf("%d/%d CoreDNS pod(s) not ready: %s", len(notReady), len(pods), strings.Join(notReady, ", "))
+		return SeverityWarn, fmt.Sprintf("%d/%d CoreDNS pod(s) not ready: %s", len(notReady), len(pods), strings.Join(notReady, ", "))
 	}
-	return "pass", fmt.Sprintf("all %d CoreDNS pod(s) ready", len(pods))
+	return SeverityPass, fmt.Sprintf("all %d CoreDNS pod(s) ready", len(pods))
 }
 
 // netpolSeverity always returns "pass" with a summary stating how many
 // NetworkPolicies matched the pod.
 func netpolSeverity(result netpol.NetpolResult) (severity, summary string) {
-	return "pass", fmt.Sprintf("%d NetworkPolicy/ies matched", len(result.Policies))
+	return SeverityPass, fmt.Sprintf("%d NetworkPolicy/ies matched", len(result.Policies))
 }
 
 // cniSeverity derives a severity and summary from CNI DaemonSet health and
@@ -121,16 +130,16 @@ func netpolSeverity(result netpol.NetpolResult) (severity, summary string) {
 // have exhausted IPs, "warn" if the DaemonSet is unhealthy, "pass" otherwise.
 func cniSeverity(dsHealthy bool, exhaustedCount int) (severity, summary string) {
 	if exhaustedCount > 0 {
-		return "fail", fmt.Sprintf("%d node(s) with exhausted IPs; DaemonSet healthy: %v", exhaustedCount, dsHealthy)
+		return SeverityFail, fmt.Sprintf("%d node(s) with exhausted IPs; DaemonSet healthy: %v", exhaustedCount, dsHealthy)
 	}
 	if !dsHealthy {
-		return "warn", fmt.Sprintf("DaemonSet unhealthy; %d node(s) with exhausted IPs", exhaustedCount)
+		return SeverityWarn, fmt.Sprintf("DaemonSet unhealthy; %d node(s) with exhausted IPs", exhaustedCount)
 	}
-	return "pass", fmt.Sprintf("DaemonSet healthy; %d node(s) with exhausted IPs", exhaustedCount)
+	return SeverityPass, fmt.Sprintf("DaemonSet healthy; %d node(s) with exhausted IPs", exhaustedCount)
 }
 
 // sgSeverity always returns "pass" with a summary stating how many security
 // groups were retrieved.
 func sgSeverity(sgCount int) (severity, summary string) {
-	return "pass", fmt.Sprintf("%d security groups retrieved", sgCount)
+	return SeverityPass, fmt.Sprintf("%d security groups retrieved", sgCount)
 }

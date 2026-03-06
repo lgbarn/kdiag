@@ -89,9 +89,12 @@ func ParseDigOutput(raw string) (resolved []string, queryTimeMs int64, err error
 			if len(parts) >= 2 {
 				rest := strings.TrimSpace(parts[1])
 				// status may be followed by comma, space, or other chars
-				status = strings.FieldsFunc(rest, func(r rune) bool {
+				fields := strings.FieldsFunc(rest, func(r rune) bool {
 					return r == ',' || r == ' ' || r == '\t'
-				})[0]
+				})
+				if len(fields) > 0 {
+					status = fields[0]
+				}
 			}
 		}
 	}

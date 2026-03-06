@@ -92,18 +92,8 @@ func runPodShell(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("error checking RBAC: %w", err)
 	}
-
-	allAllowed := true
-	for _, c := range checks {
-		if !c.Allowed {
-			allAllowed = false
-			break
-		}
-	}
-
-	if !allAllowed {
-		rbacErr := k8s.FormatRBACError(checks)
-		return fmt.Errorf("insufficient permissions to use ephemeral containers\n\n%s", rbacErr)
+	if msg := k8s.FormatRBACError(checks); msg != "" {
+		return fmt.Errorf("insufficient permissions to use ephemeral containers\n\n%s", msg)
 	}
 
 	if IsVerbose() {

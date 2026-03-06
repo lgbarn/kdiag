@@ -191,11 +191,7 @@ func runDNS(cmd *cobra.Command, args []string) error {
 	fmt.Fprintln(os.Stdout, "\nCoreDNS Health")
 	printer.PrintHeader("POD", "STATUS", "READY")
 	for _, p := range coreDNSPods {
-		readyStr := "false"
-		if p.Ready {
-			readyStr = "true"
-		}
-		printer.PrintRow(p.Name, p.Status, readyStr)
+		printer.PrintRow(p.Name, p.Status, boolStr(p.Ready))
 	}
 	if err := printer.Flush(); err != nil {
 		return fmt.Errorf("error flushing output: %w", err)
