@@ -209,3 +209,88 @@ func TestNetpolSeverity(t *testing.T) {
 		})
 	}
 }
+
+func TestCniSeverity(t *testing.T) {
+	tests := []struct {
+		name         string
+		dsHealthy    bool
+		exhausted    int
+		wantSeverity string
+		wantContains string
+	}{
+		{
+			name:         "healthy ds no exhausted returns pass",
+			dsHealthy:    true,
+			exhausted:    0,
+			wantSeverity: "pass",
+			wantContains: "0",
+		},
+		{
+			name:         "unhealthy ds no exhausted returns warn",
+			dsHealthy:    false,
+			exhausted:    0,
+			wantSeverity: "warn",
+			wantContains: "DaemonSet",
+		},
+		{
+			name:         "healthy ds with exhausted returns fail",
+			dsHealthy:    true,
+			exhausted:    2,
+			wantSeverity: "fail",
+			wantContains: "2",
+		},
+		{
+			name:         "unhealthy ds with exhausted returns fail (fail takes precedence)",
+			dsHealthy:    false,
+			exhausted:    1,
+			wantSeverity: "fail",
+			wantContains: "1",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			severity, summary := cniSeverity(tt.dsHealthy, tt.exhausted)
+			if severity != tt.wantSeverity {
+				t.Errorf("cniSeverity() severity = %q, want %q", severity, tt.wantSeverity)
+			}
+			if !strings.Contains(summary, tt.wantContains) {
+				t.Errorf("cniSeverity() summary = %q, want it to contain %q", summary, tt.wantContains)
+			}
+		})
+	}
+}
+
+func TestSgSeverity(t *testing.T) {
+	tests := []struct {
+		name         string
+		sgCount      int
+		wantSeverity string
+		wantContains string
+	}{
+		{
+			name:         "three security groups returns pass",
+			sgCount:      3,
+			wantSeverity: "pass",
+			wantContains: "3",
+		},
+		{
+			name:         "zero security groups returns pass",
+			sgCount:      0,
+			wantSeverity: "pass",
+			wantContains: "0",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			severity, summary := sgSeverity(tt.sgCount)
+			if severity != tt.wantSeverity {
+				t.Errorf("sgSeverity() severity = %q, want %q", severity, tt.wantSeverity)
+			}
+			if !strings.Contains(summary, tt.wantContains) {
+				t.Errorf("sgSeverity() summary = %q, want it to contain %q", summary, tt.wantContains)
+			}
+		})
+	}
+}

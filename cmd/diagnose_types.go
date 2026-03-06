@@ -115,3 +115,22 @@ func corednsSeverity(pods []dns.CoreDNSPod) (severity, summary string) {
 func netpolSeverity(result netpol.NetpolResult) (severity, summary string) {
 	return "pass", fmt.Sprintf("%d NetworkPolicy/ies matched", len(result.Policies))
 }
+
+// cniSeverity derives a severity and summary from CNI DaemonSet health and
+// the count of nodes with exhausted IP addresses. Returns "fail" if any nodes
+// have exhausted IPs, "warn" if the DaemonSet is unhealthy, "pass" otherwise.
+func cniSeverity(dsHealthy bool, exhaustedCount int) (severity, summary string) {
+	if exhaustedCount > 0 {
+		return "fail", fmt.Sprintf("%d node(s) with exhausted IPs; DaemonSet healthy: %v", exhaustedCount, dsHealthy)
+	}
+	if !dsHealthy {
+		return "warn", fmt.Sprintf("DaemonSet unhealthy; %d node(s) with exhausted IPs", exhaustedCount)
+	}
+	return "pass", fmt.Sprintf("DaemonSet healthy; %d node(s) with exhausted IPs", exhaustedCount)
+}
+
+// sgSeverity always returns "pass" with a summary stating how many security
+// groups were retrieved.
+func sgSeverity(sgCount int) (severity, summary string) {
+	return "pass", fmt.Sprintf("%d security groups retrieved", sgCount)
+}
