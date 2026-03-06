@@ -164,6 +164,7 @@ func runLogs(cmd *cobra.Command, args []string) error {
 	jsonMode := GetOutputFormat() == "json"
 
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)

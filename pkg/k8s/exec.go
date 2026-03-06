@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math"
 	"net/url"
 	"os"
 	"os/signal"
@@ -68,12 +69,16 @@ func buildExecutor(config *rest.Config, method string, url *url.URL) (remotecomm
 // the terminal) and a TerminalSizeQueue ready to be passed to StreamOptions.
 // The caller must call cleanup (typically via defer) when the session ends.
 func setupRawTerminal(ctx context.Context) (cleanup func(), tsq *terminalSizeQueue, err error) {
-	fd := int(os.Stdin.Fd())
+	fd := int(os.Stdin.Fd()) // #nosec G115 -- fd is a small non-negative int; uintptr->int is safe
 	oldState, err := term.MakeRaw(fd)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to put terminal into raw mode: %w", err)
 	}
-	cleanup = func() { term.Restore(fd, oldState) } //nolint:errcheck
+	cleanup = func() {
+		if err := term.Restore(fd, oldState); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to restore terminal: %v\n", err)
+		}
+	}
 
 	tsq = newTerminalSizeQueue()
 	tsq.monitor(ctx)
@@ -177,6 +182,17 @@ func AttachToContainer(ctx context.Context, client *Client, opts AttachOpts) err
 	return exec.StreamWithContext(ctx, streamOpts)
 }
 
+// clampUint16 safely converts an int to uint16, clamping to math.MaxUint16.
+func clampUint16(v int) uint16 {
+	if v < 0 {
+		return 0
+	}
+	if v > math.MaxUint16 {
+		return math.MaxUint16
+	}
+	return uint16(v)
+}
+
 // terminalSizeQueue implements remotecommand.TerminalSizeQueue by listening for
 // SIGWINCH signals and forwarding the current terminal dimensions.
 type terminalSizeQueue struct {
@@ -205,9 +221,10 @@ func (t *terminalSizeQueue) monitor(ctx context.Context) {
 	signal.Notify(sigCh, syscall.SIGWINCH)
 
 	// Send initial size immediately.
-	if w, h, err := term.GetSize(int(os.Stdin.Fd())); err == nil {
+	fd := int(os.Stdin.Fd()) // #nosec G115 -- fd is a small non-negative int
+	if w, h, err := term.GetSize(fd); err == nil {
 		select {
-		case t.resize <- remotecommand.TerminalSize{Width: uint16(w), Height: uint16(h)}:
+		case t.resize <- remotecommand.TerminalSize{Width: clampUint16(w), Height: clampUint16(h)}:
 		default:
 		}
 	}
@@ -220,12 +237,12 @@ func (t *terminalSizeQueue) monitor(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case <-sigCh:
-				w, h, err := term.GetSize(int(os.Stdin.Fd()))
+				w, h, err := term.GetSize(fd)
 				if err != nil {
 					continue
 				}
 				select {
-				case t.resize <- remotecommand.TerminalSize{Width: uint16(w), Height: uint16(h)}:
+				case t.resize <- remotecommand.TerminalSize{Width: clampUint16(w), Height: clampUint16(h)}:
 				default:
 					// Drop resize event if consumer is not ready.
 				}

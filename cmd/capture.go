@@ -207,7 +207,7 @@ func runCapture(cmd *cobra.Command, args []string) error {
 	// Prepare output destination.
 	var outputWriter *os.File
 	if captureOutput != "" {
-		f, err := os.OpenFile(captureOutput, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+		f, err := os.OpenFile(captureOutput, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600) // #nosec G304 -- user-provided CLI flag path is expected
 		if err != nil {
 			return fmt.Errorf("failed to create output file %q: %w", captureOutput, err)
 		}
