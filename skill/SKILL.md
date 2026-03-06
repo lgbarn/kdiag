@@ -34,17 +34,26 @@ always gather more context as you go.
 kdiag must be installed and on the user's PATH. All commands support `--namespace`, `--context`,
 `--kubeconfig`, `--output json` (machine-readable), and `--verbose` flags.
 
+### Argument Conventions
+
+All commands accept a **bare pod name** (`my-pod`) or `pod/my-pod` — both work everywhere.
+The `inspect` command also supports other types: `deployment/name`, `daemonset/name`, etc.
+A bare name always defaults to pod.
+
 ### Quick Reference
 
 | Command | Purpose | Example |
 |---------|---------|---------|
 | `kdiag health` | Cluster-wide health overview | `kdiag health -o json` |
 | `kdiag diagnose <pod>` | Run all checks against a pod | `kdiag diagnose my-pod -n prod` |
-| `kdiag inspect <type/name>` | Deep-dive into a resource | `kdiag inspect pod/my-pod` |
+| `kdiag inspect <name>` | Deep-dive into a resource (defaults to pod) | `kdiag inspect my-pod` |
+| `kdiag inspect <type/name>` | Deep-dive into a specific resource type | `kdiag inspect deployment/my-app` |
 | `kdiag dns <pod-or-service>` | DNS resolution + CoreDNS health | `kdiag dns my-service` |
-| `kdiag connectivity <src> <dst>` | Test network connectivity | `kdiag connectivity pod-a svc-b` |
+| `kdiag connectivity <src> <dst>` | Test network connectivity | `kdiag connectivity pod-a svc-b -p 80` |
 | `kdiag trace <src-pod> <dst-svc>` | Map the full network path | `kdiag trace pod-a my-service` |
 | `kdiag netpol <pod>` | Show NetworkPolicies affecting a pod | `kdiag netpol my-pod` |
+| `kdiag logs <pod>` | Tail logs from a single pod | `kdiag logs my-pod` |
+| `kdiag logs deployment/<name>` | Tail logs from all pods in a deployment | `kdiag logs deployment/my-app` |
 | `kdiag logs -l <selector>` | Tail logs from matching pods | `kdiag logs -l app=myapp` |
 | `kdiag shell <pod>` | Debug shell in a pod | `kdiag shell my-pod` |
 | `kdiag shell --node <node>` | Debug shell on a node | `kdiag shell --node ip-10-0-1-5` |
@@ -61,9 +70,9 @@ output programmatically, and default table format when showing results to the us
 ### Pod Not Running (CrashLoopBackOff, Pending, Failed, etc.)
 
 1. Run `kdiag diagnose <pod>` to get a quick pass/warn/fail overview
-2. Run `kdiag inspect pod/<pod>` to see container states, restart counts, conditions, and events
+2. Run `kdiag inspect <pod>` to see container states, restart counts, conditions, and events
 3. Based on findings:
-   - **CrashLoopBackOff**: Check logs with `kdiag logs -l <selector>` or inspect the container's state detail
+   - **CrashLoopBackOff**: Check logs with `kdiag logs <pod>` or `kdiag logs -l <selector>`
    - **Pending**: Look at events for scheduling failures (insufficient resources, node affinity, taints)
    - **ImagePullBackOff**: Check the image name and pull secrets in the events
    - **OOMKilled**: Container terminated reason will show OOMKilled - suggest increasing memory limits
@@ -87,7 +96,7 @@ output programmatically, and default table format when showing results to the us
    - Are CoreDNS pods Running and Ready?
    - Did the dig query resolve to IPs?
    - Is the query time unusually high (>100ms suggests issues)?
-3. If CoreDNS is unhealthy, check with `kdiag inspect pod/<coredns-pod> -n kube-system`
+3. If CoreDNS is unhealthy, check with `kdiag inspect <coredns-pod> -n kube-system`
 
 ### Cluster-Wide Health Check
 

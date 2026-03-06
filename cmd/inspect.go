@@ -59,9 +59,9 @@ type ReplicaSummary struct {
 }
 
 var inspectCmd = &cobra.Command{
-	Use:   "inspect <type/name>",
+	Use:   "inspect <name> or inspect <type/name>",
 	Short: "Show enriched resource details: owner chain, events, conditions, and container status",
-	Long:  "Inspect a Kubernetes resource with enriched output including ownership chain, related events, conditions, restart counts, and container statuses. Supports: pod, deployment, replicaset, daemonset, statefulset.",
+	Long:  "Inspect a Kubernetes resource with enriched output including ownership chain, related events, conditions, restart counts, and container statuses. A bare name defaults to pod (e.g., 'inspect nginx' is the same as 'inspect pod/nginx'). Supports: pod, deployment, replicaset, daemonset, statefulset.",
 	Args:  cobra.ExactArgs(1),
 	RunE:  runInspect,
 }
@@ -70,11 +70,17 @@ func init() {
 	rootCmd.AddCommand(inspectCmd)
 }
 
-// parseResourceArg parses a "type/name" argument into its kind and name components.
+// parseResourceArg parses a resource argument into its kind and name components.
+// Accepts "type/name" (e.g., pod/nginx, deployment/myapp) or a bare name which
+// defaults to pod (e.g., "nginx" is treated as "pod/nginx").
 func parseResourceArg(arg string) (kind, name string, err error) {
 	parts := strings.SplitN(arg, "/", 2)
-	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		return "", "", fmt.Errorf("invalid resource argument %q: expected type/name format (e.g., pod/nginx, deployment/myapp)", arg)
+	if len(parts) == 1 {
+		// Bare name — default to pod.
+		return "pod", arg, nil
+	}
+	if parts[0] == "" || parts[1] == "" {
+		return "", "", fmt.Errorf("invalid resource argument %q: expected name or type/name (e.g., nginx, pod/nginx, deployment/myapp)", arg)
 	}
 	kind = strings.ToLower(parts[0])
 	name = parts[1]

@@ -49,7 +49,7 @@ func init() {
 }
 
 func runConnectivity(cmd *cobra.Command, args []string) error {
-	srcPod := args[0]
+	srcPod := StripPodPrefix(args[0])
 	dst := args[1]
 
 	if connectivityProtocol != "tcp" && connectivityProtocol != "http" {

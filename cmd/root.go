@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -89,3 +90,14 @@ func GetTimeout() time.Duration { return timeout }
 
 // IsVerbose returns true when --verbose/-v is set.
 func IsVerbose() bool { return verbose }
+
+// StripPodPrefix removes a "pod/" prefix from an argument so that commands
+// accepting bare pod names also work when called with "pod/my-pod" for
+// consistency with the type/name format used by inspect.
+func StripPodPrefix(arg string) string {
+	lower := strings.ToLower(arg)
+	if strings.HasPrefix(lower, "pod/") {
+		return arg[4:]
+	}
+	return arg
+}

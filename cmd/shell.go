@@ -46,7 +46,7 @@ func runShell(cmd *cobra.Command, args []string) error {
 
 // runPodShell implements Path A: ephemeral container shell in a pod.
 func runPodShell(cmd *cobra.Command, args []string) error {
-	podName := args[0]
+	podName := StripPodPrefix(args[0])
 
 	if err := ValidateDebugImage(); err != nil {
 		return err

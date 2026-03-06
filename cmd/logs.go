@@ -14,6 +14,7 @@ import (
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/lgbarn/kdiag/pkg/k8s"
 )
@@ -100,9 +101,9 @@ func (pw *prefixWriter) Write(p []byte) (int, error) {
 }
 
 var logsCmd = &cobra.Command{
-	Use:   "logs",
-	Short: "Tail logs from pods matching a label selector with color-coded output",
-	Args:  cobra.NoArgs,
+	Use:   "logs [pod-name | deployment/name] [-l selector]",
+	Short: "Tail logs from a pod, deployment, or pods matching a label selector",
+	Args:  cobra.MaximumNArgs(1),
 	RunE:  runLogs,
 }
 
@@ -117,10 +118,6 @@ func init() {
 
 func runLogs(cmd *cobra.Command, args []string) error {
 	selector, _ := cmd.Flags().GetString("selector")
-	if selector == "" {
-		return fmt.Errorf("--selector / -l flag is required")
-	}
-
 	filterStr, _ := cmd.Flags().GetString("filter")
 	maxPods, _ := cmd.Flags().GetInt("max-pods")
 	if maxPods < 1 {
@@ -135,16 +132,49 @@ func runLogs(cmd *cobra.Command, args []string) error {
 
 	namespace := client.Namespace
 
-	if IsVerbose() {
-		fmt.Fprintf(os.Stderr, "[kdiag] listing pods with selector %q in namespace %q\n", selector, namespace)
-	}
-
 	listCtx, listCancel := context.WithTimeout(context.Background(), GetTimeout())
 	defer listCancel()
 
-	pods, err := k8s.ListPodsBySelector(listCtx, client, namespace, selector)
-	if err != nil {
-		return fmt.Errorf("error listing pods: %w", err)
+	var pods []corev1.Pod
+
+	if len(args) == 1 {
+		target := args[0]
+		if strings.HasPrefix(strings.ToLower(target), "deployment/") {
+			// deployment/name — look up pods via the deployment's label selector.
+			deployName := target[len("deployment/"):]
+			deploy, dErr := client.Clientset.AppsV1().Deployments(namespace).Get(listCtx, deployName, metav1.GetOptions{})
+			if dErr != nil {
+				return fmt.Errorf("deployment %q not found in namespace %q", deployName, namespace)
+			}
+			sel, sErr := metav1.LabelSelectorAsSelector(deploy.Spec.Selector)
+			if sErr != nil {
+				return fmt.Errorf("invalid label selector on deployment %q: %w", deployName, sErr)
+			}
+			selector = sel.String()
+		} else {
+			// Bare pod name — strip optional pod/ prefix.
+			podName := StripPodPrefix(target)
+			pod, pErr := client.Clientset.CoreV1().Pods(namespace).Get(listCtx, podName, metav1.GetOptions{})
+			if pErr != nil {
+				return fmt.Errorf("pod %q not found in namespace %q", podName, namespace)
+			}
+			pods = []corev1.Pod{*pod}
+		}
+	}
+
+	if selector == "" && len(pods) == 0 {
+		return fmt.Errorf("specify a pod name, deployment/name, or --selector / -l flag")
+	}
+
+	if len(pods) == 0 {
+		if IsVerbose() {
+			fmt.Fprintf(os.Stderr, "[kdiag] listing pods with selector %q in namespace %q\n", selector, namespace)
+		}
+		var lErr error
+		pods, lErr = k8s.ListPodsBySelector(listCtx, client, namespace, selector)
+		if lErr != nil {
+			return fmt.Errorf("error listing pods: %w", lErr)
+		}
 	}
 
 	if len(pods) == 0 {

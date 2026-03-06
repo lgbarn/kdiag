@@ -89,6 +89,20 @@ eks-sg             pass      4 security groups retrieved
 Total: 5  Pass: 4  Warn: 1  Fail: 0  Error: 0  Skipped: 0
 ```
 
+## Argument Conventions
+
+All commands accept a **bare pod name** by default. You can optionally use `pod/name` syntax for clarity — both forms work everywhere:
+
+```sh
+# These are equivalent:
+kdiag inspect my-pod
+kdiag inspect pod/my-pod
+
+# inspect also supports other resource types:
+kdiag inspect deployment/my-app
+kdiag inspect daemonset/my-ds
+```
+
 ## Command Reference
 
 ### diagnose
@@ -96,7 +110,8 @@ Total: 5  Pass: 4  Warn: 1  Fail: 0  Error: 0  Skipped: 0
 Run all diagnostic checks against a pod and display a severity-ranked summary.
 
 ```sh
-kdiag diagnose <pod> [-n namespace]
+kdiag diagnose <pod-name> [-n namespace]
+kdiag diagnose pod/my-pod [-n namespace]
 ```
 
 Runs: inspect, dns, netpol, eks-cni, eks-sg (when on EKS).
@@ -105,11 +120,14 @@ Runs: inspect, dns, netpol, eks-cni, eks-sg (when on EKS).
 
 ### inspect
 
-Show pod and container status including state, restart counts, and last state detail.
+Show enriched resource details: owner chain, events, conditions, and container status.
 
 ```sh
-kdiag inspect <pod> [-n namespace] [-o table|json]
+kdiag inspect <name> [-n namespace] [-o table|json]
+kdiag inspect <type/name> [-n namespace] [-o table|json]
 ```
+
+A bare name defaults to pod. Supported types: `pod`, `deployment`, `replicaset`, `daemonset`, `statefulset`.
 
 ---
 
@@ -118,7 +136,7 @@ kdiag inspect <pod> [-n namespace] [-o table|json]
 Check CoreDNS pod health and test DNS resolution from inside a pod.
 
 ```sh
-kdiag dns <pod> [-n namespace] [--query hostname]
+kdiag dns <pod-or-service> [-n namespace]
 ```
 
 ---
@@ -128,17 +146,17 @@ kdiag dns <pod> [-n namespace] [--query hostname]
 List NetworkPolicies that select a pod and summarize ingress/egress rules.
 
 ```sh
-kdiag netpol <pod> [-n namespace]
+kdiag netpol <pod-name> [-n namespace]
 ```
 
 ---
 
 ### connectivity
 
-Probe TCP/UDP reachability from a pod to a target host and port.
+Test TCP or HTTP connectivity from a source pod to a destination pod, service, or host:port.
 
 ```sh
-kdiag connectivity <pod> <host> <port> [-n namespace] [--protocol tcp|udp]
+kdiag connectivity <source-pod> <destination> [-n namespace] [-p port] [--protocol tcp|http]
 ```
 
 ---
@@ -239,11 +257,25 @@ Requires RBAC: `pods/ephemeralcontainers` create.
 
 ### logs
 
-Aggregate logs across all containers in a pod (or across pods in a deployment).
+Tail logs from a pod, deployment, or pods matching a label selector.
 
 ```sh
-kdiag logs <pod|deployment/name> [-n namespace] [--tail 100] [--since 5m]
+# By pod name
+kdiag logs <pod-name> [-n namespace]
+
+# By deployment (tails all pods)
+kdiag logs deployment/my-app [-n namespace]
+
+# By label selector
+kdiag logs -l app=myapp [-n namespace]
 ```
+
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--selector` | `-l` | | Label selector for pod matching |
+| `--filter` | | | Only show log lines containing this string |
+| `--container` | `-c` | | Specific container name to tail |
+| `--max-pods` | | `10` | Maximum concurrent pod log streams |
 
 ---
 

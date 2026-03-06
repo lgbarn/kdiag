@@ -27,7 +27,7 @@ func init() {
 }
 
 func runNetpol(cmd *cobra.Command, args []string) error {
-	podName := args[0]
+	podName := StripPodPrefix(args[0])
 
 	client, err := k8s.NewClient(ConfigFlags)
 	if err != nil {

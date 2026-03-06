@@ -29,7 +29,7 @@ func init() {
 }
 
 func runDNS(cmd *cobra.Command, args []string) error {
-	target := args[0]
+	target := StripPodPrefix(args[0])
 
 	if err := ValidateDebugImage(); err != nil {
 		return err

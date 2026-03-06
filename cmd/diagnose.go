@@ -40,7 +40,7 @@ func sanitizeError(msg string) string {
 }
 
 var diagnoseCmd = &cobra.Command{
-	Use:   "diagnose <pod>",
+	Use:   "diagnose <pod-name>",
 	Short: "Run all diagnostic checks against a pod and report pass/warn/fail status",
 	Args:  cobra.ExactArgs(1),
 	RunE:  runDiagnose,
@@ -51,7 +51,7 @@ func init() {
 }
 
 func runDiagnose(cmd *cobra.Command, args []string) error {
-	podName := args[0]
+	podName := StripPodPrefix(args[0])
 
 	client, err := k8s.NewClient(ConfigFlags)
 	if err != nil {

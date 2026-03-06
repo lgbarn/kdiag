@@ -43,7 +43,7 @@ func init() {
 }
 
 func runTrace(cmd *cobra.Command, args []string) error {
-	srcPod := args[0]
+	srcPod := StripPodPrefix(args[0])
 	dstService := args[1]
 
 	client, err := k8s.NewClient(ConfigFlags)
