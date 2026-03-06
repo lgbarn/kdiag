@@ -3,6 +3,7 @@ package k8s
 import (
 	"context"
 	"fmt"
+	"io"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -107,4 +108,68 @@ func WaitForContainerRunning(ctx context.Context, client *Client, namespace, pod
 	}
 
 	return nil
+}
+
+// EphemeralExecOpts holds the parameters for RunInEphemeralContainer.
+type EphemeralExecOpts struct {
+	PodName         string
+	Namespace       string
+	Image           string
+	ImagePullSecret string
+	Command         []string // command to exec inside the container (not the container entrypoint)
+	Stdout          io.Writer
+	Stderr          io.Writer
+	Verbose         bool
+}
+
+// RunInEphemeralContainer encapsulates the common 5-step ephemeral container
+// exec pattern used by the dns and connectivity commands:
+//  1. Run RBAC pre-flight (CheckEphemeralContainerRBAC + FormatRBACError).
+//  2. Create an ephemeral container with entrypoint "sleep infinity".
+//  3. Wait for the container to reach Running state.
+//  4. Exec opts.Command inside the container, streaming to opts.Stdout/Stderr.
+//  5. Return any exec error.
+//
+// capture.go is intentionally excluded because it uses attach instead of exec
+// and requires special SIGINT handling and file output.
+func RunInEphemeralContainer(ctx context.Context, client *Client, opts EphemeralExecOpts) error {
+	// Step 1: RBAC pre-flight.
+	checks, err := CheckEphemeralContainerRBAC(ctx, client.Clientset, opts.Namespace)
+	if err != nil {
+		return fmt.Errorf("error checking RBAC: %w", err)
+	}
+	if msg := FormatRBACError(checks); msg != "" {
+		return fmt.Errorf("insufficient permissions to use ephemeral containers\n\n%s", msg)
+	}
+
+	// Step 2: Create ephemeral container (sleep keeps it alive for exec).
+	containerName, err := CreateEphemeralContainer(ctx, client, EphemeralContainerOpts{
+		PodName:         opts.PodName,
+		Namespace:       opts.Namespace,
+		Image:           opts.Image,
+		Command:         []string{"sleep", "infinity"},
+		Stdin:           false,
+		TTY:             false,
+		ImagePullSecret: opts.ImagePullSecret,
+	})
+	if err != nil {
+		return fmt.Errorf("error creating ephemeral container: %w", err)
+	}
+
+	// Step 3: Wait for running.
+	if err := WaitForContainerRunning(ctx, client, opts.Namespace, opts.PodName, containerName); err != nil {
+		return fmt.Errorf("error waiting for ephemeral container to start: %w", err)
+	}
+
+	// Step 4: Exec the requested command.
+	return ExecInContainer(ctx, client, ExecOpts{
+		Namespace:     opts.Namespace,
+		PodName:       opts.PodName,
+		ContainerName: containerName,
+		Command:       opts.Command,
+		Stdin:         nil,
+		Stdout:        opts.Stdout,
+		Stderr:        opts.Stderr,
+		TTY:           false,
+	})
 }

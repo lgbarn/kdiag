@@ -62,7 +62,7 @@ func runCapture(cmd *cobra.Command, args []string) error {
 	// Build Kubernetes client.
 	client, err := k8s.NewClient(ConfigFlags)
 	if err != nil {
-		return fmt.Errorf("failed to build Kubernetes client: %w", err)
+		return fmt.Errorf("error connecting to cluster: %w", err)
 	}
 
 	namespace := client.Namespace

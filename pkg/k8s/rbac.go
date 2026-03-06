@@ -67,6 +67,11 @@ func CheckEphemeralContainerRBAC(ctx context.Context, client kubernetes.Interfac
 // CheckSingleRBAC performs a single SelfSubjectAccessReview for the given verb,
 // resource, and subresource in the specified namespace. It returns true if the
 // action is allowed, or an error if the API call fails.
+//
+// This is used by the node-debug shell path (cmd/shell.go) to verify the caller
+// can create pods before attempting to launch a privileged node debug pod. It is
+// intentionally separate from CheckEphemeralContainerRBAC, which checks the three
+// permissions required for ephemeral container injection.
 func CheckSingleRBAC(ctx context.Context, client kubernetes.Interface, namespace, verb, resource, subresource string) (bool, error) {
 	ssar := &authorizationv1.SelfSubjectAccessReview{
 		Spec: authorizationv1.SelfSubjectAccessReviewSpec{

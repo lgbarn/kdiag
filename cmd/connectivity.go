@@ -98,6 +98,10 @@ func runConnectivity(cmd *cobra.Command, args []string) error {
 		parts := strings.SplitN(dst, ":", 2)
 		dstHost = parts[0]
 		dstPort = parts[1]
+		portNum, portErr := strconv.Atoi(dstPort)
+		if portErr != nil || portNum < 1 || portNum > 65535 {
+			return fmt.Errorf("invalid port %q: must be a number between 1 and 65535", dstPort)
+		}
 		protocol = connectivityProtocol
 		if IsVerbose() {
 			fmt.Fprintf(os.Stderr, "[kdiag] destination is host:port — host=%q port=%q\n", dstHost, dstPort)
@@ -151,15 +155,6 @@ func runConnectivity(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// RBAC pre-flight.
-	checks, err := k8s.CheckEphemeralContainerRBAC(ctx, client.Clientset, namespace)
-	if err != nil {
-		return fmt.Errorf("error checking RBAC: %w", err)
-	}
-	if msg := k8s.FormatRBACError(checks); msg != "" {
-		return fmt.Errorf("insufficient permissions to use ephemeral containers\n\n%s", msg)
-	}
-
 	// Build connectivity command.
 	var connectCmd []string
 	switch protocol {
@@ -182,46 +177,20 @@ func runConnectivity(cmd *cobra.Command, args []string) error {
 
 	if IsVerbose() {
 		fmt.Fprintf(os.Stderr, "[kdiag] creating ephemeral container in pod %s/%s\n", namespace, srcPod)
-	}
-
-	// Create ephemeral container with sleep so it stays alive for exec.
-	containerName, err := k8s.CreateEphemeralContainer(ctx, client, k8s.EphemeralContainerOpts{
-		PodName:         srcPod,
-		Namespace:       namespace,
-		Image:           GetDebugImage(),
-		Command:         []string{"sleep", "infinity"},
-		Stdin:           false,
-		TTY:             false,
-		ImagePullSecret: GetImagePullSecret(),
-	})
-	if err != nil {
-		return fmt.Errorf("error creating ephemeral container: %w", err)
-	}
-
-	if IsVerbose() {
-		fmt.Fprintf(os.Stderr, "[kdiag] waiting for ephemeral container %q to start\n", containerName)
-	}
-
-	if err := k8s.WaitForContainerRunning(ctx, client, namespace, srcPod, containerName); err != nil {
-		return fmt.Errorf("error waiting for ephemeral container to start: %w", err)
-	}
-
-	if IsVerbose() {
 		fmt.Fprintf(os.Stderr, "[kdiag] running connectivity command: %v\n", connectCmd)
 	}
 
-	// Exec and capture output.
+	// Run connectivity command via ephemeral container (RBAC pre-flight + create + wait + exec).
 	var stdout, stderr bytes.Buffer
 	start := time.Now()
-	execErr := k8s.ExecInContainer(ctx, client, k8s.ExecOpts{
-		Namespace:     namespace,
-		PodName:       srcPod,
-		ContainerName: containerName,
-		Command:       connectCmd,
-		Stdin:         nil,
-		Stdout:        &stdout,
-		Stderr:        &stderr,
-		TTY:           false,
+	execErr := k8s.RunInEphemeralContainer(ctx, client, k8s.EphemeralExecOpts{
+		PodName:         srcPod,
+		Namespace:       namespace,
+		Image:           GetDebugImage(),
+		ImagePullSecret: GetImagePullSecret(),
+		Command:         connectCmd,
+		Stdout:          &stdout,
+		Stderr:          &stderr,
 	})
 	elapsed := time.Since(start)
 

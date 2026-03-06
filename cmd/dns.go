@@ -128,58 +128,23 @@ func runDNS(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// RBAC pre-flight.
-	checks, err := k8s.CheckEphemeralContainerRBAC(ctx, client.Clientset, namespace)
-	if err != nil {
-		return fmt.Errorf("error checking RBAC: %w", err)
-	}
-	if msg := k8s.FormatRBACError(checks); msg != "" {
-		return fmt.Errorf("insufficient permissions to use ephemeral containers\n\n%s", msg)
-	}
-
-	// Create ephemeral container (no command — stays alive for exec).
-	if IsVerbose() {
-		fmt.Fprintf(os.Stderr, "[kdiag] creating ephemeral container in pod %s/%s\n", namespace, podName)
-	}
-
-	containerName, err := k8s.CreateEphemeralContainer(ctx, client, k8s.EphemeralContainerOpts{
-		PodName:         podName,
-		Namespace:       namespace,
-		Image:           GetDebugImage(),
-		Command:         []string{"sleep", "infinity"},
-		Stdin:           false,
-		TTY:             false,
-		ImagePullSecret: GetImagePullSecret(),
-	})
-	if err != nil {
-		return fmt.Errorf("error creating ephemeral container: %w", err)
-	}
-
-	if IsVerbose() {
-		fmt.Fprintf(os.Stderr, "[kdiag] waiting for ephemeral container %q to start\n", containerName)
-	}
-
-	if err := k8s.WaitForContainerRunning(ctx, client, namespace, podName, containerName); err != nil {
-		return fmt.Errorf("error waiting for ephemeral container to start: %w", err)
-	}
-
-	// Exec dig command and capture output.
+	// Exec dig command via ephemeral container (RBAC pre-flight + create + wait + exec).
 	digCmd := dns.BuildDigCommand(fqdn, coreDNSIP)
 
 	if IsVerbose() {
+		fmt.Fprintf(os.Stderr, "[kdiag] creating ephemeral container in pod %s/%s\n", namespace, podName)
 		fmt.Fprintf(os.Stderr, "[kdiag] running dig command: %v\n", digCmd)
 	}
 
 	var stdout, stderr bytes.Buffer
-	execErr := k8s.ExecInContainer(ctx, client, k8s.ExecOpts{
-		Namespace:     namespace,
-		PodName:       podName,
-		ContainerName: containerName,
-		Command:       digCmd,
-		Stdin:         nil,
-		Stdout:        &stdout,
-		Stderr:        &stderr,
-		TTY:           false,
+	execErr := k8s.RunInEphemeralContainer(ctx, client, k8s.EphemeralExecOpts{
+		PodName:         podName,
+		Namespace:       namespace,
+		Image:           GetDebugImage(),
+		ImagePullSecret: GetImagePullSecret(),
+		Command:         digCmd,
+		Stdout:          &stdout,
+		Stderr:          &stderr,
 	})
 
 	// Parse dig output (even if exec returned an error, we may have partial output).

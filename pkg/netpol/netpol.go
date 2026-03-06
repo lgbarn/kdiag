@@ -155,21 +155,11 @@ func summarisePeerList(peers []networkingv1.NetworkPolicyPeer, fallbackLabel str
 	return entries, ipBlocks
 }
 
-func summarisePeers(peers []networkingv1.NetworkPolicyPeer) (from []string, ipBlocks []string) {
-	return summarisePeerList(peers, "<all sources>")
-}
-
-func summariseToPeers(peers []networkingv1.NetworkPolicyPeer) (to []string, ipBlocks []string) {
-	return summarisePeerList(peers, "<all destinations>")
-}
-
 func summariseIngressRule(rule networkingv1.NetworkPolicyIngressRule) RuleSummary {
 	rs := RuleSummary{
 		Ports: summarisePorts(rule.Ports),
 	}
-	from, ipBlocks := summarisePeers(rule.From)
-	rs.From = from
-	rs.IPBlocks = ipBlocks
+	rs.From, rs.IPBlocks = summarisePeerList(rule.From, "<all sources>")
 	return rs
 }
 
@@ -177,8 +167,6 @@ func summariseEgressRule(rule networkingv1.NetworkPolicyEgressRule) RuleSummary 
 	rs := RuleSummary{
 		Ports: summarisePorts(rule.Ports),
 	}
-	to, ipBlocks := summariseToPeers(rule.To)
-	rs.To = to
-	rs.IPBlocks = ipBlocks
+	rs.To, rs.IPBlocks = summarisePeerList(rule.To, "<all destinations>")
 	return rs
 }
