@@ -150,17 +150,12 @@ func evaluatePod(pod corev1.Pod) (PodIssueSummary, bool) {
 
 // evaluateDeployment checks deployment health and returns a summary and whether it is an issue.
 func evaluateDeployment(deploy appsv1.Deployment) (ControllerSummary, bool) {
-	desired := int32(1)
-	if deploy.Spec.Replicas != nil {
-		desired = *deploy.Spec.Replicas
-	}
-
 	summary := ControllerSummary{
 		Namespace: deploy.Namespace,
 		Kind:      "Deployment",
 		Name:      deploy.Name,
 		Ready:     deploy.Status.ReadyReplicas,
-		Desired:   desired,
+		Desired:   derefReplicas(deploy.Spec.Replicas),
 		Status:    "Healthy",
 	}
 
@@ -175,7 +170,7 @@ func evaluateDeployment(deploy appsv1.Deployment) (ControllerSummary, bool) {
 		}
 	}
 
-	if deploy.Status.ReadyReplicas < desired {
+	if deploy.Status.ReadyReplicas < summary.Desired {
 		summary.Status = "Degraded"
 		return summary, true
 	}
@@ -209,26 +204,21 @@ func evaluateDaemonSet(ds appsv1.DaemonSet) (ControllerSummary, bool) {
 
 // evaluateStatefulSet checks statefulset health and returns a summary and whether it is an issue.
 func evaluateStatefulSet(ss appsv1.StatefulSet) (ControllerSummary, bool) {
-	desired := int32(1)
-	if ss.Spec.Replicas != nil {
-		desired = *ss.Spec.Replicas
-	}
-
 	summary := ControllerSummary{
 		Namespace: ss.Namespace,
 		Kind:      "StatefulSet",
 		Name:      ss.Name,
 		Ready:     ss.Status.ReadyReplicas,
-		Desired:   desired,
+		Desired:   derefReplicas(ss.Spec.Replicas),
 		Status:    "Healthy",
 	}
 
-	if ss.Status.ReadyReplicas == 0 && desired > 0 {
+	if ss.Status.ReadyReplicas == 0 && summary.Desired > 0 {
 		summary.Status = "Unavailable"
 		return summary, true
 	}
 
-	if ss.Status.ReadyReplicas < desired {
+	if ss.Status.ReadyReplicas < summary.Desired {
 		summary.Status = "Degraded"
 		return summary, true
 	}
@@ -479,10 +469,3 @@ func runHealth(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// boolStr converts a bool to "true"/"false" string for table output.
-func boolStr(b bool) string {
-	if b {
-		return "true"
-	}
-	return "false"
-}

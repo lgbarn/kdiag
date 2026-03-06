@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 	corev1 "k8s.io/api/core/v1"
@@ -91,17 +90,6 @@ func parseResourceArg(arg string) (kind, name string, err error) {
 		return "", "", fmt.Errorf("unsupported resource type %q: supported types are pod, deployment, replicaset, daemonset, statefulset", kind)
 	}
 	return kind, name, nil
-}
-
-// eventAge computes a human-readable age string from an event's timestamps.
-func eventAge(lastTimestamp metav1.Time, eventTime metav1.MicroTime) string {
-	if !lastTimestamp.IsZero() {
-		return time.Since(lastTimestamp.Time).Truncate(time.Second).String()
-	}
-	if !eventTime.IsZero() {
-		return time.Since(eventTime.Time).Truncate(time.Second).String()
-	}
-	return "unknown"
 }
 
 func runInspect(cmd *cobra.Command, args []string) error {
@@ -291,12 +279,8 @@ func inspectDeployment(ctx context.Context, client *k8s.Client, namespace, name 
 		})
 	}
 
-	desired := int32(1)
-	if deploy.Spec.Replicas != nil {
-		desired = *deploy.Spec.Replicas
-	}
 	replicas := &ReplicaSummary{
-		Desired:   desired,
+		Desired:   derefReplicas(deploy.Spec.Replicas),
 		Ready:     deploy.Status.ReadyReplicas,
 		Available: deploy.Status.AvailableReplicas,
 		Updated:   deploy.Status.UpdatedReplicas,
@@ -357,12 +341,8 @@ func inspectReplicaSet(ctx context.Context, client *k8s.Client, namespace, name 
 		})
 	}
 
-	desired := int32(1)
-	if rs.Spec.Replicas != nil {
-		desired = *rs.Spec.Replicas
-	}
 	replicas := &ReplicaSummary{
-		Desired:   desired,
+		Desired:   derefReplicas(rs.Spec.Replicas),
 		Ready:     rs.Status.ReadyReplicas,
 		Available: rs.Status.AvailableReplicas,
 		Updated:   0, // ReplicaSet does not track updated replicas
@@ -459,12 +439,8 @@ func inspectStatefulSet(ctx context.Context, client *k8s.Client, namespace, name
 		})
 	}
 
-	desired := int32(1)
-	if ss.Spec.Replicas != nil {
-		desired = *ss.Spec.Replicas
-	}
 	replicas := &ReplicaSummary{
-		Desired:   desired,
+		Desired:   derefReplicas(ss.Spec.Replicas),
 		Ready:     ss.Status.ReadyReplicas,
 		Available: ss.Status.AvailableReplicas,
 		Updated:   ss.Status.UpdatedReplicas,

@@ -123,6 +123,9 @@ func runLogs(cmd *cobra.Command, args []string) error {
 
 	filterStr, _ := cmd.Flags().GetString("filter")
 	maxPods, _ := cmd.Flags().GetInt("max-pods")
+	if maxPods < 1 {
+		return fmt.Errorf("--max-pods must be at least 1, got %d", maxPods)
+	}
 	containerName, _ := cmd.Flags().GetString("container")
 
 	client, err := k8s.NewClient(ConfigFlags)
