@@ -44,7 +44,7 @@ changelog:
       - "^test:"
       - "^chore:"
 
-homebrew_casks:
+brews:
   - name: kdiag
     repository:
       owner: lgbarn
@@ -53,4 +53,9 @@ homebrew_casks:
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
     homepage: "https://github.com/lgbarn/kdiag"
     description: "Kubernetes diagnostics CLI with first-class EKS support"
+    license: "MIT"
+    install: |
+      bin.install "kdiag"
+    test: |
+      system "#{bin}/kdiag", "--help"
     skip_upload: auto

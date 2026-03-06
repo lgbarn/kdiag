@@ -187,22 +187,26 @@ func runDiagnose(cmd *cobra.Command, args []string) error {
 
 	report.Summary = computeSummary(report.Checks)
 
+	var diagnoseErr error
+	if report.Summary.Fail > 0 {
+		diagnoseErr = ErrDiagnoseFail
+	}
+
 	if GetOutputFormat() == "json" {
 		jp, err := output.NewJSONPrinter(os.Stdout)
 		if err != nil {
 			return err
 		}
-		return jp.Print(report)
+		if err := jp.Print(report); err != nil {
+			return err
+		}
+		return diagnoseErr
 	}
 
 	if err := printDiagnoseTable(report); err != nil {
 		return err
 	}
-
-	if report.Summary.Fail > 0 {
-		return ErrDiagnoseFail
-	}
-	return nil
+	return diagnoseErr
 }
 
 func printDiagnoseTable(report DiagnoseReport) error {
