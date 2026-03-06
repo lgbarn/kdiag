@@ -10,6 +10,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	eks "github.com/lgbarn/kdiag/cmd/eks"
 	awspkg "github.com/lgbarn/kdiag/pkg/aws"
 	"github.com/lgbarn/kdiag/pkg/dns"
 	"github.com/lgbarn/kdiag/pkg/k8s"
@@ -148,15 +149,14 @@ func runDiagnose(cmd *cobra.Command, args []string) error {
 				}
 			}
 
-			// EKS SG check.
-			sgPod, sgPodErr := client.Clientset.CoreV1().Pods(namespace).Get(ctx, podName, metav1.GetOptions{})
-			if sgPodErr != nil {
+			// EKS SG check: reuse pod fetched above for the netpol check.
+			if pod == nil {
 				report.Checks = append(report.Checks, DiagnoseCheckResult{
 					Name: "sg", Severity: "error",
-					Summary: "failed to get pod for SG check", Error: sgPodErr.Error(),
+					Summary: "failed to get pod for SG check", Error: podErr.Error(),
 				})
 			} else {
-				sgIDs, sgErr := resolveENISGs(ctx, client, ec2Client, sgPod)
+				sgIDs, sgErr := eks.ResolveENISGs(ctx, client, ec2Client, pod)
 				if sgErr != nil {
 					report.Checks = append(report.Checks, DiagnoseCheckResult{
 						Name: "sg", Severity: "error",
@@ -253,32 +253,11 @@ func printDiagnoseTable(report DiagnoseReport) error {
 // countExhaustedNodes iterates nodes, queries ENI usage per node, and returns
 // the count of nodes with IP utilization at or above 85%.
 func countExhaustedNodes(ctx context.Context, ec2Client awspkg.EC2API, nodes []corev1.Node) int {
-	type eligibleNode struct {
-		name         string
-		instanceType string
-		instanceID   string
-	}
+	eligible, _ := eks.ClassifyNodes(nodes)
 
-	var eligible []eligibleNode
 	uniqueTypes := map[string]struct{}{}
-
-	for i := range nodes {
-		node := &nodes[i]
-		if k8s.IsFargateNode(node.Name) {
-			continue
-		}
-		instanceType, ok := node.Labels["node.kubernetes.io/instance-type"]
-		if !ok || instanceType == "" {
-			continue
-		}
-		instanceID, err := awspkg.ParseInstanceID(node.Spec.ProviderID)
-		if err != nil {
-			continue
-		}
-		eligible = append(eligible, eligibleNode{
-			name: node.Name, instanceType: instanceType, instanceID: instanceID,
-		})
-		uniqueTypes[instanceType] = struct{}{}
+	for _, en := range eligible {
+		uniqueTypes[en.InstanceType] = struct{}{}
 	}
 
 	typeList := make([]string, 0, len(uniqueTypes))
@@ -293,11 +272,11 @@ func countExhaustedNodes(ctx context.Context, ec2Client awspkg.EC2API, nodes []c
 
 	exhausted := 0
 	for _, en := range eligible {
-		eniInfo, err := awspkg.ListNodeENIs(ctx, ec2Client, en.instanceID)
+		eniInfo, err := awspkg.ListNodeENIs(ctx, ec2Client, en.InstanceID)
 		if err != nil {
 			continue
 		}
-		limits := limitsMap[en.instanceType]
+		limits := limitsMap[en.InstanceType]
 		if limits == nil {
 			continue
 		}
@@ -313,38 +292,3 @@ func countExhaustedNodes(ctx context.Context, ec2Client awspkg.EC2API, nodes []c
 	return exhausted
 }
 
-// resolveENISGs returns the security group IDs for a pod: branch ENI SGs if
-// the pod has the vpc.amazonaws.com/pod-eni annotation, or node primary ENI
-// SGs otherwise.
-func resolveENISGs(ctx context.Context, client *k8s.Client, ec2Client awspkg.EC2API, pod *corev1.Pod) ([]string, error) {
-	const podENIAnnotation = "vpc.amazonaws.com/pod-eni"
-
-	if annotation, ok := pod.Annotations[podENIAnnotation]; ok {
-		eniAnnotations, err := awspkg.ParsePodENIAnnotation(annotation)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse pod ENI annotation: %w", err)
-		}
-		if len(eniAnnotations) == 0 {
-			return nil, fmt.Errorf("pod %q has empty pod-eni annotation", pod.Name)
-		}
-		sgIDs, err := awspkg.GetENISecurityGroups(ctx, ec2Client, eniAnnotations[0].ENIID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get security groups for branch ENI: %w", err)
-		}
-		return sgIDs, nil
-	}
-
-	node, err := client.Clientset.CoreV1().Nodes().Get(ctx, pod.Spec.NodeName, metav1.GetOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("failed to get node %q: %w", pod.Spec.NodeName, err)
-	}
-	instanceID, err := awspkg.ParseInstanceID(node.Spec.ProviderID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse providerID %q: %w", node.Spec.ProviderID, err)
-	}
-	sgIDs, err := awspkg.GetNodePrimaryENISecurityGroups(ctx, ec2Client, instanceID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get primary ENI security groups: %w", err)
-	}
-	return sgIDs, nil
-}

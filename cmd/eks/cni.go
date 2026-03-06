@@ -135,52 +135,10 @@ func runCNI(cmd *cobra.Command, args []string) error {
 	// Determine if prefix delegation is enabled.
 	prefixDelegation := cniConfig.PrefixDelegation
 
-	type eligibleNode struct {
-		name         string
-		instanceType string
-		instanceID   string
-	}
-
-	var eligible []eligibleNode
-	var skipped []SkippedNode
+	eligible, skipped := ClassifyNodes(nodeList.Items)
 	uniqueTypes := map[string]struct{}{}
-
-	for i := range nodeList.Items {
-		node := &nodeList.Items[i]
-
-		// Skip Fargate nodes.
-		if k8s.IsFargateNode(node.Name) {
-			skipped = append(skipped, SkippedNode{
-				NodeName: node.Name,
-				Reason:   "Fargate node — no EC2 ENIs",
-			})
-			continue
-		}
-
-		instanceType, ok := node.Labels["node.kubernetes.io/instance-type"]
-		if !ok || instanceType == "" {
-			skipped = append(skipped, SkippedNode{
-				NodeName: node.Name,
-				Reason:   "missing instance-type label",
-			})
-			continue
-		}
-
-		instanceID, parseErr := awspkg.ParseInstanceID(node.Spec.ProviderID)
-		if parseErr != nil {
-			skipped = append(skipped, SkippedNode{
-				NodeName: node.Name,
-				Reason:   fmt.Sprintf("cannot parse providerID: %s", node.Spec.ProviderID),
-			})
-			continue
-		}
-
-		eligible = append(eligible, eligibleNode{
-			name:         node.Name,
-			instanceType: instanceType,
-			instanceID:   instanceID,
-		})
-		uniqueTypes[instanceType] = struct{}{}
+	for _, en := range eligible {
+		uniqueTypes[en.InstanceType] = struct{}{}
 	}
 
 	// 6. Batch query instance type limits.
@@ -196,20 +154,20 @@ func runCNI(cmd *cobra.Command, args []string) error {
 	var ipExhausted []string
 
 	for _, en := range eligible {
-		eniInfo, err := awspkg.ListNodeENIs(ctx, ec2Client, en.instanceID)
+		eniInfo, err := awspkg.ListNodeENIs(ctx, ec2Client, en.InstanceID)
 		if err != nil {
 			if isVerbose() {
 				fmt.Fprintf(os.Stderr, "[kdiag] warning: could not list ENIs for node %s (%s): %v\n",
-					en.name, en.instanceID, err)
+					en.Name, en.InstanceID, err)
 			}
 			skipped = append(skipped, SkippedNode{
-				NodeName: en.name,
+				NodeName: en.Name,
 				Reason:   fmt.Sprintf("ENI query failed: %v", err),
 			})
 			continue
 		}
 
-		limits := limitsMap[en.instanceType]
+		limits := limitsMap[en.InstanceType]
 		var maxENIs, maxIPsPerENI int32
 		var maxTotalIPs int
 		if limits != nil {
@@ -234,12 +192,12 @@ func runCNI(cmd *cobra.Command, args []string) error {
 		// Exhausted if >= 85%.
 		exhausted := utilPct >= 85
 		if exhausted {
-			ipExhausted = append(ipExhausted, en.name)
+			ipExhausted = append(ipExhausted, en.Name)
 		}
 
 		nodes = append(nodes, NodeCapacity{
-			NodeName:     en.name,
-			InstanceType: en.instanceType,
+			NodeName:     en.Name,
+			InstanceType: en.InstanceType,
 			MaxENIs:      maxENIs,
 			MaxIPsPerENI: maxIPsPerENI,
 			MaxTotalIPs:  maxTotalIPs,

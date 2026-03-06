@@ -10,6 +10,10 @@ import (
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 )
 
+// PodENIAnnotationKey is the annotation key used by the VPC CNI "security groups
+// for pods" feature to store branch ENI details on a pod.
+const PodENIAnnotationKey = "vpc.amazonaws.com/pod-eni"
+
 // SecurityGroupDetail holds the full description of an EC2 security group.
 type SecurityGroupDetail struct {
 	GroupID      string   `json:"group_id"`

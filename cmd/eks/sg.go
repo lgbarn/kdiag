@@ -7,14 +7,13 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	awspkg "github.com/lgbarn/kdiag/pkg/aws"
 	"github.com/lgbarn/kdiag/pkg/k8s"
 	"github.com/lgbarn/kdiag/pkg/output"
 )
-
-const podENIAnnotation = "vpc.amazonaws.com/pod-eni"
 
 // SGReport holds the full security-group report for a pod.
 type SGReport struct {
@@ -87,44 +86,19 @@ func runSG(cmd *cobra.Command, args []string) error {
 	}
 
 	// Determine ENI source: branch-ENI (security groups for pods) or node primary ENI.
-	var sgIDs []string
-
-	if annotation, ok := pod.Annotations[podENIAnnotation]; ok {
-		// Pod uses Security Groups for Pods — use the branch ENI.
-		eniAnnotations, parseErr := awspkg.ParsePodENIAnnotation(annotation)
-		if parseErr != nil {
-			return fmt.Errorf("failed to parse pod ENI annotation: %w", parseErr)
-		}
-		if len(eniAnnotations) == 0 {
-			return fmt.Errorf("pod %q has empty pod-eni annotation", podName)
-		}
-		eniID := eniAnnotations[0].ENIID
-		report.ENIID = eniID
+	// Set metadata based on annotation presence before resolving SG IDs.
+	if annotation, ok := pod.Annotations[awspkg.PodENIAnnotationKey]; ok {
 		report.ENISource = "branch-eni (security groups for pods)"
-
-		sgIDs, err = awspkg.GetENISecurityGroups(ctx, ec2Client, eniID)
-		if err != nil {
-			return fmt.Errorf("failed to get security groups for ENI %q: %w", eniID, err)
+		if parsed, parseErr := awspkg.ParsePodENIAnnotation(annotation); parseErr == nil && len(parsed) > 0 {
+			report.ENIID = parsed[0].ENIID
 		}
 	} else {
-		// Pod inherits node security groups — use node's primary ENI.
 		report.ENISource = "node-primary-eni (inherited from node)"
+	}
 
-		// Resolve instance ID from the node's providerID.
-		node, nodeErr := client.Clientset.CoreV1().Nodes().Get(ctx, pod.Spec.NodeName, metav1.GetOptions{})
-		if nodeErr != nil {
-			return fmt.Errorf("failed to get node %q: %w", pod.Spec.NodeName, nodeErr)
-		}
-
-		instanceID, parseErr := awspkg.ParseInstanceID(node.Spec.ProviderID)
-		if parseErr != nil {
-			return fmt.Errorf("failed to parse providerID %q: %w", node.Spec.ProviderID, parseErr)
-		}
-
-		sgIDs, err = awspkg.GetNodePrimaryENISecurityGroups(ctx, ec2Client, instanceID)
-		if err != nil {
-			return fmt.Errorf("failed to get primary ENI security groups for instance %q: %w", instanceID, err)
-		}
+	sgIDs, err := ResolveENISGs(ctx, client, ec2Client, pod)
+	if err != nil {
+		return fmt.Errorf("failed to resolve ENI security groups: %w", err)
 	}
 
 	// Fetch full security group details.
@@ -240,4 +214,38 @@ func printSGTable(r SGReport) error {
 		fmt.Fprintln(os.Stdout)
 	}
 	return nil
+}
+
+// ResolveENISGs returns the security group IDs for a pod: branch ENI SGs if
+// the pod has the vpc.amazonaws.com/pod-eni annotation, or node primary ENI
+// SGs otherwise.
+func ResolveENISGs(ctx context.Context, client *k8s.Client, ec2Client awspkg.EC2API, pod *corev1.Pod) ([]string, error) {
+	if annotation, ok := pod.Annotations[awspkg.PodENIAnnotationKey]; ok {
+		eniAnnotations, err := awspkg.ParsePodENIAnnotation(annotation)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse pod ENI annotation: %w", err)
+		}
+		if len(eniAnnotations) == 0 {
+			return nil, fmt.Errorf("pod %q has empty pod-eni annotation", pod.Name)
+		}
+		sgIDs, err := awspkg.GetENISecurityGroups(ctx, ec2Client, eniAnnotations[0].ENIID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get security groups for branch ENI: %w", err)
+		}
+		return sgIDs, nil
+	}
+
+	node, err := client.Clientset.CoreV1().Nodes().Get(ctx, pod.Spec.NodeName, metav1.GetOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get node %q: %w", pod.Spec.NodeName, err)
+	}
+	instanceID, err := awspkg.ParseInstanceID(node.Spec.ProviderID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse providerID %q: %w", node.Spec.ProviderID, err)
+	}
+	sgIDs, err := awspkg.GetNodePrimaryENISecurityGroups(ctx, ec2Client, instanceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get primary ENI security groups: %w", err)
+	}
+	return sgIDs, nil
 }

@@ -84,66 +84,12 @@ func runNode(cmd *cobra.Command, args []string) error {
 	var report NodeReport
 	report.Summary.TotalNodes = len(nodeList.Items)
 
-	// Eligible node data collected for batch limit query and ENI queries.
-	type eligibleNode struct {
-		name         string
-		instanceType string
-		instanceID   string
-		computeType  k8spkg.ComputeType
-		note         string
-	}
-	var eligible []eligibleNode
-	uniqueTypes := map[string]struct{}{}
-
 	// 5. Classify each node.
-	for i := range nodeList.Items {
-		node := &nodeList.Items[i]
-		ct := k8spkg.DetectNodeComputeType(node)
-
-		switch ct {
-		case k8spkg.ComputeTypeFargate:
-			report.Skipped = append(report.Skipped, SkippedNode{
-				NodeName: node.Name,
-				Reason:   "Fargate node — no EC2 ENIs",
-			})
-			continue
-
-		case k8spkg.ComputeTypeAutoMode:
-			// Fall through — proceed with note.
-		}
-
-		// 6. Extract instance type label and provider ID.
-		instanceType, ok := node.Labels["node.kubernetes.io/instance-type"]
-		if !ok || instanceType == "" {
-			report.Skipped = append(report.Skipped, SkippedNode{
-				NodeName: node.Name,
-				Reason:   "missing instance-type label",
-			})
-			continue
-		}
-
-		instanceID, err := awspkg.ParseInstanceID(node.Spec.ProviderID)
-		if err != nil {
-			report.Skipped = append(report.Skipped, SkippedNode{
-				NodeName: node.Name,
-				Reason:   fmt.Sprintf("cannot parse providerID: %s", node.Spec.ProviderID),
-			})
-			continue
-		}
-
-		note := ""
-		if ct == k8spkg.ComputeTypeAutoMode {
-			note = "EKS Auto Mode — ENI management is AWS-managed; limits may differ"
-		}
-
-		eligible = append(eligible, eligibleNode{
-			name:         node.Name,
-			instanceType: instanceType,
-			instanceID:   instanceID,
-			computeType:  ct,
-			note:         note,
-		})
-		uniqueTypes[instanceType] = struct{}{}
+	eligible, skipped := ClassifyNodes(nodeList.Items)
+	report.Skipped = append(report.Skipped, skipped...)
+	uniqueTypes := map[string]struct{}{}
+	for _, en := range eligible {
+		uniqueTypes[en.InstanceType] = struct{}{}
 	}
 
 	// 7. Batch-query instance type limits.
@@ -156,24 +102,24 @@ func runNode(cmd *cobra.Command, args []string) error {
 
 	// 8-9. Per-node ENI query and utilization calculation.
 	for _, en := range eligible {
-		eniInfo, err := awspkg.ListNodeENIs(ctx, ec2Client, en.instanceID)
+		eniInfo, err := awspkg.ListNodeENIs(ctx, ec2Client, en.InstanceID)
 		if err != nil {
 			if isVerbose() {
 				fmt.Fprintf(os.Stderr, "[kdiag] warning: could not list ENIs for node %s (%s): %v\n",
-					en.name, en.instanceID, err)
+					en.Name, en.InstanceID, err)
 			}
 			report.Skipped = append(report.Skipped, SkippedNode{
-				NodeName: en.name,
+				NodeName: en.Name,
 				Reason:   fmt.Sprintf("ENI query failed: %v", err),
 			})
 			continue
 		}
 
-		limits := limitsMap[en.instanceType]
+		limits := limitsMap[en.InstanceType]
 		if limits == nil {
 			report.Skipped = append(report.Skipped, SkippedNode{
-				NodeName: en.name,
-				Reason:   fmt.Sprintf("instance type limits not available for %s", en.instanceType),
+				NodeName: en.Name,
+				Reason:   fmt.Sprintf("instance type limits not available for %s", en.InstanceType),
 			})
 			continue
 		}
@@ -201,9 +147,9 @@ func runNode(cmd *cobra.Command, args []string) error {
 		}
 
 		report.Nodes = append(report.Nodes, NodeENIStatus{
-			NodeName:     en.name,
-			InstanceType: en.instanceType,
-			ComputeType:  string(en.computeType),
+			NodeName:     en.Name,
+			InstanceType: en.InstanceType,
+			ComputeType:  string(en.ComputeType),
 			MaxENIs:      maxENIs,
 			MaxIPsPerENI: maxIPsPerENI,
 			CurrentENIs:  currentENIs,
@@ -211,7 +157,7 @@ func runNode(cmd *cobra.Command, args []string) error {
 			MaxTotalIPs:  maxTotalIPs,
 			Utilization:  strconv.Itoa(utilPct),
 			Status:       status,
-			Note:         en.note,
+			Note:         en.Note,
 		})
 	}
 

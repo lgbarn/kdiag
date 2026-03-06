@@ -7,9 +7,11 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 
 	awspkg "github.com/lgbarn/kdiag/pkg/aws"
+	k8spkg "github.com/lgbarn/kdiag/pkg/k8s"
 	"github.com/lgbarn/kdiag/pkg/output"
 )
 
@@ -109,6 +111,66 @@ func newEC2Client(ctx context.Context, host string) (awspkg.EC2API, error) {
 type SkippedNode struct {
 	NodeName string `json:"node_name"`
 	Reason   string `json:"reason"`
+}
+
+// EligibleNode is an EC2-backed node that passed classification for ENI/IP checks.
+type EligibleNode struct {
+	Name         string
+	InstanceType string
+	InstanceID   string
+	ComputeType  k8spkg.ComputeType // empty for standard managed nodes
+	Note         string             // non-empty for Auto Mode nodes
+}
+
+// ClassifyNodes partitions nodes into eligible EC2-backed nodes and skipped nodes.
+// Fargate nodes are always skipped. Nodes missing an instance-type label or a
+// parseable providerID are also skipped. Auto Mode nodes are included as eligible
+// with a descriptive Note.
+func ClassifyNodes(nodes []corev1.Node) (eligible []EligibleNode, skipped []SkippedNode) {
+	for i := range nodes {
+		node := &nodes[i]
+		ct := k8spkg.DetectNodeComputeType(node)
+
+		if ct == k8spkg.ComputeTypeFargate {
+			skipped = append(skipped, SkippedNode{
+				NodeName: node.Name,
+				Reason:   "Fargate node — no EC2 ENIs",
+			})
+			continue
+		}
+
+		instanceType, ok := node.Labels["node.kubernetes.io/instance-type"]
+		if !ok || instanceType == "" {
+			skipped = append(skipped, SkippedNode{
+				NodeName: node.Name,
+				Reason:   "missing instance-type label",
+			})
+			continue
+		}
+
+		instanceID, err := awspkg.ParseInstanceID(node.Spec.ProviderID)
+		if err != nil {
+			skipped = append(skipped, SkippedNode{
+				NodeName: node.Name,
+				Reason:   fmt.Sprintf("cannot parse providerID: %s", node.Spec.ProviderID),
+			})
+			continue
+		}
+
+		note := ""
+		if ct == k8spkg.ComputeTypeAutoMode {
+			note = "EKS Auto Mode — ENI management is AWS-managed; limits may differ"
+		}
+
+		eligible = append(eligible, EligibleNode{
+			Name:         node.Name,
+			InstanceType: instanceType,
+			InstanceID:   instanceID,
+			ComputeType:  ct,
+			Note:         note,
+		})
+	}
+	return
 }
 
 // uniqueKeys returns a slice of all keys from a map[string]struct{}.
