@@ -317,6 +317,38 @@ The following IAM permissions are required for `eks` subcommands:
 
 These permissions should be granted to the IAM role associated with the node or the principal running `kdiag` (e.g., via IRSA or instance profile).
 
+## Claude Code Skill
+
+kdiag ships with a [Claude Code](https://docs.anthropic.com/en/docs/claude-code) skill that turns Claude into a Kubernetes troubleshooting assistant. It knows all kdiag commands and follows structured playbooks to diagnose pod crashes, service connectivity failures, DNS issues, and EKS-specific problems.
+
+### Install the skill
+
+Copy the skill directory into your Claude Code skills path:
+
+```sh
+cp -r skill/SKILL.md ~/.claude/skills/kdiag-SKILL.md
+```
+
+Or reference it directly in your project's `.claude/settings.json`:
+
+```json
+{
+  "skills": ["./skill/SKILL.md"]
+}
+```
+
+### Usage
+
+Once installed, just describe your issue in Claude Code and the skill activates automatically:
+
+- "my pod is stuck in CrashLoopBackOff"
+- "I can't reach my-service from pod-a"
+- "check the health of my cluster"
+- "why is my pod pending?"
+- "are there any network policies blocking traffic to my-pod?"
+
+Claude will run the appropriate kdiag commands, interpret the results, and guide you to a fix.
+
 ## License
 
 MIT — see [LICENSE](LICENSE) for details.
