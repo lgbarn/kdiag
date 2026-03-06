@@ -28,7 +28,6 @@ var (
 var captureCmd = &cobra.Command{
 	Use:   "capture <pod-name>",
 	Short: "Capture network traffic from a pod using tcpdump",
-	Args:  cobra.ExactArgs(1),
 	RunE:  runCapture,
 }
 
@@ -43,6 +42,9 @@ func init() {
 }
 
 func runCapture(cmd *cobra.Command, args []string) error {
+	if len(args) != 1 {
+		return fmt.Errorf("error: requires exactly 1 argument (pod name)\n\nUsage:\n  %s", cmd.UseLine())
+	}
 	podName := args[0]
 
 	// Validate output path directory exists before doing any Kubernetes work.
