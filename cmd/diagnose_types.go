@@ -162,3 +162,29 @@ func refsSeverity(missing []podRef, optionalMissing []podRef, total int) (severi
 	}
 	return SeverityPass, fmt.Sprintf("%d configmap/secret ref(s) verified", total)
 }
+
+// ingressSeverity derives a severity from ingress check results found during diagnose.
+func ingressSeverity(rules []IngressRuleResult, tlsList []IngressTLSResult) (severity, summary string) {
+	if len(rules) == 0 {
+		return SeverityPass, "no ingress references found"
+	}
+
+	var issues []string
+	for _, r := range rules {
+		if !r.ServiceExists {
+			issues = append(issues, fmt.Sprintf("service %q not found", r.ServiceName))
+		} else if r.EndpointsReady == 0 {
+			issues = append(issues, fmt.Sprintf("service %q has 0 endpoints", r.ServiceName))
+		}
+	}
+	for _, t := range tlsList {
+		if !t.Exists && t.SecretName != "" {
+			issues = append(issues, fmt.Sprintf("TLS secret %q not found", t.SecretName))
+		}
+	}
+
+	if len(issues) > 0 {
+		return SeverityFail, strings.Join(issues, "; ")
+	}
+	return SeverityPass, fmt.Sprintf("%d ingress rule(s) verified", len(rules))
+}

@@ -245,6 +245,114 @@ func checkControllerHealth(ctx context.Context, client *k8s.Client, controller s
 	return fmt.Sprintf("%d/%d pods ready", ready, total)
 }
 
+// findIngressesForPod finds Ingresses that route to Services selecting this pod.
+func findIngressesForPod(ctx context.Context, client *k8s.Client, namespace string, pod *corev1.Pod) ([]IngressRuleResult, []IngressTLSResult) {
+	// Find services that select this pod.
+	svcList, err := client.Clientset.CoreV1().Services(namespace).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, nil
+	}
+
+	podSvcNames := map[string]bool{}
+	for _, svc := range svcList.Items {
+		if len(svc.Spec.Selector) == 0 {
+			continue
+		}
+		match := true
+		for k, v := range svc.Spec.Selector {
+			if pod.Labels[k] != v {
+				match = false
+				break
+			}
+		}
+		if match {
+			podSvcNames[svc.Name] = true
+		}
+	}
+
+	if len(podSvcNames) == 0 {
+		return nil, nil
+	}
+
+	// Find ingresses referencing those services.
+	ingList, err := client.Clientset.NetworkingV1().Ingresses(namespace).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, nil
+	}
+
+	var rules []IngressRuleResult
+	var tlsResults []IngressTLSResult
+	seenTLS := map[string]bool{}
+
+	for _, ing := range ingList.Items {
+		for _, rule := range ing.Spec.Rules {
+			if rule.HTTP == nil {
+				continue
+			}
+			for _, path := range rule.HTTP.Paths {
+				if path.Backend.Service == nil {
+					continue
+				}
+				if !podSvcNames[path.Backend.Service.Name] {
+					continue
+				}
+				rr := IngressRuleResult{
+					Host:          rule.Host,
+					Path:          path.Path,
+					ServiceName:   path.Backend.Service.Name,
+					ServiceExists: true,
+				}
+				if path.Backend.Service.Port.Name != "" {
+					rr.ServicePort = path.Backend.Service.Port.Name
+				} else {
+					rr.ServicePort = fmt.Sprintf("%d", path.Backend.Service.Port.Number)
+				}
+				ep, epErr := client.Clientset.CoreV1().Endpoints(namespace).Get(ctx, rr.ServiceName, metav1.GetOptions{})
+				if epErr == nil {
+					rr.EndpointsReady = countReadyEndpoints(ep)
+				}
+				rules = append(rules, rr)
+			}
+		}
+
+		// Check TLS for matching ingresses only if this ingress references our services.
+		hasMatch := false
+		for _, rule := range ing.Spec.Rules {
+			if rule.HTTP == nil {
+				continue
+			}
+			for _, path := range rule.HTTP.Paths {
+				if path.Backend.Service != nil && podSvcNames[path.Backend.Service.Name] {
+					hasMatch = true
+					break
+				}
+			}
+			if hasMatch {
+				break
+			}
+		}
+		if hasMatch {
+			for _, tls := range ing.Spec.TLS {
+				if seenTLS[tls.SecretName] {
+					continue
+				}
+				seenTLS[tls.SecretName] = true
+				tr := IngressTLSResult{
+					SecretName: tls.SecretName,
+					Hosts:      tls.Hosts,
+				}
+				if tls.SecretName != "" {
+					_, secErr := client.Clientset.CoreV1().Secrets(namespace).Get(ctx, tls.SecretName, metav1.GetOptions{})
+					tr.Exists = secErr == nil
+				}
+				tlsResults = append(tlsResults, tr)
+			}
+		}
+	}
+
+	return rules, tlsResults
+}
+
 // printIngressTable writes a human-readable table view of an IngressResult.
 func printIngressTable(result IngressResult) error {
 	fmt.Fprintf(os.Stdout, "\nIngress: %s  Namespace: %s  Class: %s\n",
