@@ -25,6 +25,7 @@ When the user reports an issue, gather just enough context to start:
 1. **What's the symptom?** (pod crashing, service unreachable, deployment stuck, etc.)
 2. **What namespace?** (default if not specified)
 3. **What resource?** (pod name, service name, deployment name)
+4. **EKS cluster?** If EKS commands fail with credential errors, ask: "Which AWS profile should I use? (e.g., `--profile myprofile`)"
 
 Don't over-interview. If the user gives you a pod name, start diagnosing immediately. You can
 always gather more context as you go.
@@ -63,6 +64,8 @@ A bare name always defaults to pod.
 | `kdiag eks node` | Node ENI/IP capacity | `kdiag eks node` |
 | `kdiag eks node --show-pods` | Pods per node (daemonset vs workload) | `kdiag eks node --show-pods` |
 | `kdiag eks node --show-pods --status EXHAUSTED` | Pods only on exhausted nodes | `kdiag eks node --show-pods --status EXHAUSTED` |
+| `kdiag eks endpoint` | Check VPC endpoints for AWS services | `kdiag eks endpoint` |
+| `kdiag ingress <name>` | Inspect Ingress rules, backends, TLS, controller | `kdiag ingress my-ingress -n prod` |
 
 ## Troubleshooting Playbooks
 
@@ -126,7 +129,26 @@ These commands require the cluster to be EKS and valid AWS credentials:
    - Shows namespace breakdown so you can spot which namespaces dominate
    - Key insight: if all pods are daemonsets and zero are workloads, the node type is too small
 
-Use `--aws-profile` and `--aws-region` flags if the default AWS credentials don't match the cluster.
+Use `--profile` and `--region` flags if the default AWS credentials don't match the cluster.
+
+### Ingress Issues
+
+1. Run `kdiag ingress <name>` to check:
+   - Ingress class and controller type (ALB, NGINX, etc.)
+   - Backend services exist and have ready endpoints
+   - TLS secrets exist
+   - Controller pod health
+2. If backends show 0 ready endpoints: check that the Service selector matches pod labels
+3. If TLS secret is missing: verify the secret name and namespace
+4. For ALB issues: check aws-load-balancer-controller pods in kube-system
+5. For NGINX issues: check ingress-nginx pods in ingress-nginx namespace
+
+### VPC Endpoint Issues
+
+1. Run `kdiag eks endpoint` to check if AWS service traffic uses VPC endpoints
+2. Services resolving to **private** IPs have VPC endpoints — traffic stays in your VPC
+3. Services resolving to **public** IPs traverse the internet — consider adding VPC endpoints for security and performance
+4. EKS API Access shows whether the cluster API server resolves to private or public IPs
 
 ### Network Debugging (Advanced)
 
