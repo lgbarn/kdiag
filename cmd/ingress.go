@@ -1,8 +1,19 @@
 package cmd
 
 import (
+	"context"
+	"fmt"
+	"os"
+	"strings"
+
+	"github.com/spf13/cobra"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/lgbarn/kdiag/pkg/k8s"
+	"github.com/lgbarn/kdiag/pkg/output"
 )
 
 // IngressResult holds the structured output of an ingress inspection.
@@ -51,4 +62,233 @@ func countReadyEndpoints(ep *corev1.Endpoints) int {
 		count += len(subset.Addresses)
 	}
 	return count
+}
+
+var ingressCmd = &cobra.Command{
+	Use:   "ingress <name>",
+	Short: "Inspect Ingress rules, backends, TLS secrets, and controller health",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runIngress,
+}
+
+func init() {
+	rootCmd.AddCommand(ingressCmd)
+}
+
+func runIngress(cmd *cobra.Command, args []string) error {
+	name := args[0]
+
+	client, err := k8s.NewClient(ConfigFlags)
+	if err != nil {
+		return fmt.Errorf("error connecting to cluster: %w", err)
+	}
+
+	namespace := client.Namespace
+
+	ctx, cancel := context.WithTimeout(context.Background(), GetTimeout())
+	defer cancel()
+
+	if IsVerbose() {
+		fmt.Fprintf(os.Stderr, "[kdiag] getting ingress %q in namespace %q\n", name, namespace)
+	}
+
+	ingress, err := client.Clientset.NetworkingV1().Ingresses(namespace).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return fmt.Errorf("ingress %q not found in namespace %q", name, namespace)
+		}
+		return fmt.Errorf("failed to get ingress %q: %w", name, err)
+	}
+
+	controller := detectIngressController(ingress)
+
+	// Determine class label for display.
+	class := ""
+	if ingress.Spec.IngressClassName != nil {
+		class = *ingress.Spec.IngressClassName
+	} else if v, ok := ingress.Annotations["kubernetes.io/ingress.class"]; ok {
+		class = v
+	}
+
+	// Build rules results.
+	var rules []IngressRuleResult
+	for _, rule := range ingress.Spec.Rules {
+		host := rule.Host
+		if host == "" {
+			host = "*"
+		}
+		if rule.HTTP == nil {
+			continue
+		}
+		for _, path := range rule.HTTP.Paths {
+			rr := IngressRuleResult{
+				Host: host,
+				Path: path.Path,
+			}
+			if path.Backend.Service != nil {
+				svcName := path.Backend.Service.Name
+				rr.ServiceName = svcName
+
+				// Represent port as number or name.
+				port := path.Backend.Service.Port
+				if port.Name != "" {
+					rr.ServicePort = port.Name
+				} else {
+					rr.ServicePort = fmt.Sprintf("%d", port.Number)
+				}
+
+				// Check if the Service exists.
+				_, svcErr := client.Clientset.CoreV1().Services(namespace).Get(ctx, svcName, metav1.GetOptions{})
+				if svcErr == nil {
+					rr.ServiceExists = true
+				} else if !apierrors.IsNotFound(svcErr) {
+					if IsVerbose() {
+						fmt.Fprintf(os.Stderr, "[kdiag] warning: error checking service %q: %v\n", svcName, svcErr)
+					}
+				}
+
+				// Count ready endpoints.
+				ep, epErr := client.Clientset.CoreV1().Endpoints(namespace).Get(ctx, svcName, metav1.GetOptions{})
+				if epErr == nil {
+					rr.EndpointsReady = countReadyEndpoints(ep)
+				}
+			}
+			rules = append(rules, rr)
+		}
+	}
+
+	// Build TLS results.
+	var tlsResults []IngressTLSResult
+	for _, tls := range ingress.Spec.TLS {
+		tr := IngressTLSResult{
+			SecretName: tls.SecretName,
+			Hosts:      tls.Hosts,
+		}
+		_, secretErr := client.Clientset.CoreV1().Secrets(namespace).Get(ctx, tls.SecretName, metav1.GetOptions{})
+		if secretErr == nil {
+			tr.Exists = true
+		} else if !apierrors.IsNotFound(secretErr) {
+			if IsVerbose() {
+				fmt.Fprintf(os.Stderr, "[kdiag] warning: error checking secret %q: %v\n", tls.SecretName, secretErr)
+			}
+		}
+		tlsResults = append(tlsResults, tr)
+	}
+
+	ctrlHealth := checkControllerHealth(ctx, client, controller)
+
+	result := IngressResult{
+		Name:       name,
+		Namespace:  namespace,
+		Class:      class,
+		Controller: controller,
+		Rules:      rules,
+		TLS:        tlsResults,
+		CtrlHealth: ctrlHealth,
+	}
+
+	printer, err := output.NewPrinter(GetOutputFormat(), os.Stdout)
+	if err != nil {
+		return fmt.Errorf("unsupported output format: %w", err)
+	}
+
+	if jp, ok := printer.(*output.JSONPrinter); ok {
+		return jp.Print(result)
+	}
+
+	return printIngressTable(result)
+}
+
+// checkControllerHealth returns a readiness summary string for the ingress controller pods.
+func checkControllerHealth(ctx context.Context, client *k8s.Client, controller string) string {
+	var labelSelector, namespace string
+
+	switch strings.ToLower(controller) {
+	case "alb":
+		labelSelector = "app.kubernetes.io/name=aws-load-balancer-controller"
+		namespace = "kube-system"
+	case "nginx":
+		labelSelector = "app.kubernetes.io/name=ingress-nginx"
+		namespace = "ingress-nginx"
+	default:
+		return ""
+	}
+
+	pods, err := client.Clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: labelSelector,
+	})
+	if err != nil || len(pods.Items) == 0 {
+		if controller == "nginx" {
+			// Fallback to kube-system for nginx.
+			pods, err = client.Clientset.CoreV1().Pods("kube-system").List(ctx, metav1.ListOptions{
+				LabelSelector: labelSelector,
+			})
+			if err != nil || len(pods.Items) == 0 {
+				return "no controller pods found"
+			}
+		} else {
+			return "no controller pods found"
+		}
+	}
+
+	total := len(pods.Items)
+	ready := 0
+	for _, pod := range pods.Items {
+		for _, cond := range pod.Status.Conditions {
+			if cond.Type == corev1.PodReady && cond.Status == corev1.ConditionTrue {
+				ready++
+				break
+			}
+		}
+	}
+
+	return fmt.Sprintf("%d/%d pods ready", ready, total)
+}
+
+// printIngressTable writes a human-readable table view of an IngressResult.
+func printIngressTable(result IngressResult) error {
+	fmt.Fprintf(os.Stdout, "\nIngress: %s  Namespace: %s  Class: %s\n",
+		result.Name, result.Namespace, result.Class)
+
+	// Rules table.
+	fmt.Fprintln(os.Stdout, "\nRules:")
+	tp := output.NewTablePrinter(os.Stdout)
+	tp.PrintHeader("HOST", "PATH", "SERVICE", "PORT", "SVC EXISTS", "ENDPOINTS")
+	for _, r := range result.Rules {
+		tp.PrintRow(
+			r.Host,
+			r.Path,
+			r.ServiceName,
+			r.ServicePort,
+			boolStr(r.ServiceExists),
+			fmt.Sprintf("%d", r.EndpointsReady),
+		)
+	}
+	if err := tp.Flush(); err != nil {
+		return fmt.Errorf("error flushing rules table: %w", err)
+	}
+
+	// TLS table.
+	if len(result.TLS) > 0 {
+		fmt.Fprintln(os.Stdout, "\nTLS:")
+		tp2 := output.NewTablePrinter(os.Stdout)
+		tp2.PrintHeader("SECRET", "HOSTS", "STATUS")
+		for _, t := range result.TLS {
+			status := "missing"
+			if t.Exists {
+				status = "found"
+			}
+			tp2.PrintRow(t.SecretName, strings.Join(t.Hosts, ", "), status)
+		}
+		if err := tp2.Flush(); err != nil {
+			return fmt.Errorf("error flushing TLS table: %w", err)
+		}
+	}
+
+	// Controller health.
+	if result.CtrlHealth != "" {
+		fmt.Fprintf(os.Stdout, "\nController Health: %s\n", result.CtrlHealth)
+	}
+
+	return nil
 }
