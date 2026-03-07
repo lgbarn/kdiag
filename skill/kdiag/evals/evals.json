@@ -1,0 +1,145 @@
+{
+  "skill_name": "kdiag",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "my pod api-server-7f8b9c4d6-xk2nl in the payments namespace keeps crashing, its been doing it for about 20 minutes now and I can't figure out why. we're on EKS and I have the aws profile 'prod-east' configured. can you help me figure out what's going on?",
+      "expected_output": "Should use kdiag diagnose with -n payments, then kdiag inspect to drill into container states, then kdiag logs to check crash reason. Should use --profile prod-east for EKS commands. Should interpret results and suggest a fix.",
+      "assertions": [
+        {
+          "name": "uses_diagnose_command",
+          "type": "contains",
+          "check": "The response includes running kdiag diagnose with the pod name and -n payments"
+        },
+        {
+          "name": "uses_profile_flag",
+          "type": "contains",
+          "check": "The response uses --profile prod-east (not --aws-profile or AWS_PROFILE env var)"
+        },
+        {
+          "name": "checks_logs_for_crash",
+          "type": "contains",
+          "check": "The response checks logs (kdiag logs) since the pod is crashing"
+        },
+        {
+          "name": "interprets_output",
+          "type": "quality",
+          "check": "The response explains what the output means in plain language rather than just dumping raw output"
+        }
+      ],
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "hey so we have this ingress called 'web-ingress' in the default namespace and it stopped routing traffic about an hour ago. we're using nginx ingress controller. none of the backends seem to be getting requests anymore. whats the fastest way to figure out what broke?",
+      "expected_output": "Should use kdiag ingress web-ingress to check backend services, endpoints, TLS, and controller health. Should check if endpoints are ready and if the NGINX controller pods are healthy.",
+      "assertions": [
+        {
+          "name": "uses_ingress_command",
+          "type": "contains",
+          "check": "The response runs kdiag ingress web-ingress"
+        },
+        {
+          "name": "checks_controller_health",
+          "type": "quality",
+          "check": "The response mentions checking NGINX ingress controller pod health or suggests looking at ingress-nginx namespace"
+        },
+        {
+          "name": "checks_backends",
+          "type": "quality",
+          "check": "The response checks or mentions backend service endpoints"
+        },
+        {
+          "name": "actionable_next_steps",
+          "type": "quality",
+          "check": "The response provides clear next steps based on what might be found"
+        }
+      ],
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "we're running an EKS cluster and our security team wants to verify that none of our AWS service traffic (ECR pulls, CloudWatch logs, STS calls) is going over the public internet. they want proof that we have VPC endpoints set up correctly. how do I check this?",
+      "expected_output": "Should use kdiag eks endpoint to check VPC endpoints for AWS services. Should explain that private IPs mean VPC endpoints exist and traffic stays in the VPC, while public IPs mean traffic goes over the internet.",
+      "assertions": [
+        {
+          "name": "uses_endpoint_command",
+          "type": "contains",
+          "check": "The response runs kdiag eks endpoint"
+        },
+        {
+          "name": "explains_private_public",
+          "type": "quality",
+          "check": "The response explains what private vs public IP resolution means for VPC endpoints"
+        },
+        {
+          "name": "mentions_specific_services",
+          "type": "quality",
+          "check": "The response mentions the specific AWS services being checked (ECR, CloudWatch/logs, STS)"
+        },
+        {
+          "name": "security_context",
+          "type": "quality",
+          "check": "The response addresses the security team's concern about traffic not going over the internet"
+        }
+      ],
+      "files": []
+    },
+    {
+      "id": 4,
+      "prompt": "our deployment 'order-processor' in the fulfillment namespace has been stuck at 2/5 replicas for the last 30 minutes after we pushed a new image. the new pods keep failing but the old ones are still running. we're on EKS with profile 'staging'. can you help figure out why the rollout is stuck?",
+      "expected_output": "Should use kdiag inspect deployment/order-processor to check rollout status and conditions. Should diagnose one of the failing new pods. Should check logs. Should identify whether it's an image issue, missing config, or resource problem.",
+      "assertions": [
+        {
+          "name": "inspects_deployment",
+          "type": "contains",
+          "check": "The response runs kdiag inspect deployment/order-processor -n fulfillment (or equivalent)"
+        },
+        {
+          "name": "diagnoses_failing_pod",
+          "type": "contains",
+          "check": "The response runs kdiag diagnose on one of the failing pods to check container states and refs"
+        },
+        {
+          "name": "checks_logs",
+          "type": "contains",
+          "check": "The response checks logs (kdiag logs) to see why the new pods are failing"
+        },
+        {
+          "name": "explains_rollout_state",
+          "type": "quality",
+          "check": "The response explains the stuck rollout (old vs new ReplicaSets, partial progress) and gives actionable remediation"
+        }
+      ],
+      "files": []
+    },
+    {
+      "id": 5,
+      "prompt": "we've got 3 nodes in our EKS cluster and pods keep getting stuck in Pending. the cluster was fine yesterday but today nothing new can schedule. we suspect its a capacity or IP exhaustion issue. aws profile is 'prod-west', region us-west-2. whats the fastest way to check?",
+      "expected_output": "Should run kdiag health to see node status and pressure conditions. Should run kdiag eks node to check ENI/IP capacity. Should use --show-pods --status EXHAUSTED if nodes are exhausted. Should use --profile and --region flags.",
+      "assertions": [
+        {
+          "name": "checks_node_health",
+          "type": "contains",
+          "check": "The response runs kdiag health or kdiag eks node to check node status and capacity"
+        },
+        {
+          "name": "checks_ip_exhaustion",
+          "type": "contains",
+          "check": "The response runs kdiag eks node (with --profile prod-west) to check ENI/IP utilization"
+        },
+        {
+          "name": "uses_show_pods",
+          "type": "quality",
+          "check": "The response mentions or uses --show-pods (possibly with --status EXHAUSTED) to identify what's consuming IPs"
+        },
+        {
+          "name": "actionable_capacity_advice",
+          "type": "quality",
+          "check": "The response provides actionable advice about capacity (e.g., instance type too small, too many daemonsets, scale up nodes)"
+        }
+      ],
+      "files": []
+    }
+  ]
+}

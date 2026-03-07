@@ -49,10 +49,10 @@ A bare name always defaults to pod.
 | `kdiag health` | Cluster-wide health overview | `kdiag health -o json` |
 | `kdiag diagnose <pod>` | Run all checks against a pod (inspect, refs, dns, netpol, ingress, EKS) | `kdiag diagnose my-pod -n prod` |
 | `kdiag inspect <name>` | Deep-dive into a resource (defaults to pod) | `kdiag inspect my-pod` |
-| `kdiag inspect <type/name>` | Deep-dive into a specific resource type | `kdiag inspect deployment/my-app` |
+| `kdiag inspect <type/name>` | Inspect deployment, replicaset, daemonset, or statefulset | `kdiag inspect deployment/my-app` |
 | `kdiag dns <pod-or-service>` | DNS resolution + CoreDNS health | `kdiag dns my-service` |
-| `kdiag connectivity <src> <dst>` | Test network connectivity | `kdiag connectivity pod-a svc-b -p 80` |
-| `kdiag trace <src-pod> <dst-svc>` | Map the full network path | `kdiag trace pod-a my-service` |
+| `kdiag connectivity <src> <dst>` | Test network connectivity (tcp or http) | `kdiag connectivity pod-a svc-b -p 80 --protocol http` |
+| `kdiag trace <src-pod> <dst-svc>` | Map full network path with node/AZ info | `kdiag trace pod-a my-service` |
 | `kdiag netpol <pod>` | Show NetworkPolicies affecting a pod | `kdiag netpol my-pod` |
 | `kdiag ingress <name>` | Inspect Ingress rules, backends, TLS, controller health | `kdiag ingress my-ingress -n prod` |
 | `kdiag logs <pod>` | Tail logs from a single pod | `kdiag logs my-pod` |
@@ -60,7 +60,7 @@ A bare name always defaults to pod.
 | `kdiag logs -l <selector>` | Tail logs from matching pods | `kdiag logs -l app=myapp` |
 | `kdiag shell <pod>` | Debug shell in a pod | `kdiag shell my-pod` |
 | `kdiag shell --node <node>` | Debug shell on a node | `kdiag shell --node ip-10-0-1-5` |
-| `kdiag capture <pod>` | Capture network traffic | `kdiag capture my-pod -c 100` |
+| `kdiag capture <pod>` | Capture network traffic (ek/json/text format) | `kdiag capture my-pod -c 100 --format ek` |
 | `kdiag eks cni` | EKS VPC CNI health | `kdiag eks cni` |
 | `kdiag eks sg <pod>` | Security groups for a pod | `kdiag eks sg my-pod` |
 | `kdiag eks node` | Node ENI/IP capacity | `kdiag eks node` |
@@ -131,8 +131,8 @@ Run the pod triage script, or manually:
 
 Run the connectivity check script, or manually:
 
-1. Run `kdiag trace <source-pod> <service>` to map the full network path and verify endpoints exist
-2. Run `kdiag connectivity <source-pod> <service>` to test actual TCP/HTTP connectivity
+1. Run `kdiag trace <source-pod> <service>` to map the full network path, verify endpoints exist, and see node/AZ placement
+2. Run `kdiag connectivity <source-pod> <service> -p <port>` to test connectivity (`--protocol tcp` for raw TCP, `--protocol http` for HTTP health check)
 3. If connectivity fails:
    - Run `kdiag dns <service>` to verify DNS resolution and CoreDNS health
    - Run `kdiag netpol <pod>` on both source and destination pods to check for blocking NetworkPolicies
@@ -159,6 +159,27 @@ Run the connectivity check script, or manually:
 3. If TLS secret is missing: verify the secret name and namespace
 4. For ALB issues: check aws-load-balancer-controller pods in kube-system
 5. For NGINX issues: check ingress-nginx pods in ingress-nginx namespace
+
+### Deployment Stuck / Rollout Issues
+
+1. Run `kdiag inspect deployment/<name>` to check replica counts, conditions, and rollout status
+2. If the deployment is progressing but pods won't come up:
+   - Run `kdiag diagnose <pod>` on one of the failing pods
+   - Common causes: bad image tag, missing ConfigMap/Secret, resource quota exceeded
+3. If the rollout is stuck mid-way (old and new ReplicaSets both present):
+   - Run `kdiag logs deployment/<name>` to see logs from all pods in the deployment
+   - Check events with `kdiag inspect deployment/<name>` for `FailedCreate` or `ReplicaFailure`
+4. For DaemonSet or StatefulSet: `kdiag inspect daemonset/<name>` or `kdiag inspect statefulset/<name>`
+
+### Node Issues (NotReady, Pressure, Capacity)
+
+1. Run `kdiag health` — the node section shows NotReady nodes and nodes with memory/disk/PID pressure
+2. For EKS clusters, check node-level capacity:
+   - `kdiag eks node` — shows ENI and IP utilization per node, flags nodes at >85%
+   - `kdiag eks node --show-pods --status EXHAUSTED` — shows exactly what's consuming IPs on overloaded nodes
+   - If exhausted nodes have only daemonset pods and zero workload pods, the instance type is too small
+3. For node-level debugging: `kdiag shell --node <node-name>` to get a debug shell on the node
+4. Check if scheduling is the issue: inspect pending pods with `kdiag inspect <pod>` and look for events mentioning taints, affinity, or insufficient resources
 
 ### Cluster-Wide Health Check
 
@@ -200,10 +221,11 @@ Run the EKS health script for a full check, or individual commands:
 
 For deeper network issues:
 
-1. `kdiag capture <pod> -c 50` - Capture 50 packets from the pod's network namespace
+1. `kdiag capture <pod> -c 50` - Capture 50 packets (default `--format ek` is JSON-lines, AI-friendly)
 2. `kdiag capture <pod> -f "port 80" -d 30s` - Capture HTTP traffic for 30 seconds
 3. `kdiag capture <pod> -w capture.pcap` - Save to pcap file for Wireshark analysis
-4. `kdiag shell <pod>` - Get an interactive debug shell with netshoot tools
+4. `kdiag capture <pod> --format text` - Use tcpdump-style text output (also: `json`, `ek`)
+5. `kdiag shell <pod>` - Get an interactive debug shell with netshoot tools
 
 ## Interpreting Results
 
