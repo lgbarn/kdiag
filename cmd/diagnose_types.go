@@ -143,3 +143,22 @@ func cniSeverity(dsHealthy bool, exhaustedCount int) (severity, summary string) 
 func sgSeverity(sgCount int) (severity, summary string) {
 	return SeverityPass, fmt.Sprintf("%d security groups retrieved", sgCount)
 }
+
+// refsSeverity derives a severity and summary from a refs check result.
+func refsSeverity(missing []podRef, optionalMissing []podRef, total int) (severity, summary string) {
+	if len(missing) > 0 {
+		names := make([]string, 0, len(missing))
+		for _, r := range missing {
+			names = append(names, strings.ToLower(r.Kind)+"/"+r.Name)
+		}
+		return SeverityFail, fmt.Sprintf("missing: %s", strings.Join(names, ", "))
+	}
+	if len(optionalMissing) > 0 {
+		names := make([]string, 0, len(optionalMissing))
+		for _, r := range optionalMissing {
+			names = append(names, strings.ToLower(r.Kind)+"/"+r.Name)
+		}
+		return SeverityWarn, fmt.Sprintf("optional missing: %s", strings.Join(names, ", "))
+	}
+	return SeverityPass, fmt.Sprintf("%d configmap/secret ref(s) verified", total)
+}

@@ -10,6 +10,7 @@ import (
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	eks "github.com/lgbarn/kdiag/cmd/eks"
@@ -79,6 +80,42 @@ func runDiagnose(cmd *cobra.Command, args []string) error {
 		})
 	}
 
+	// Fetch the pod object once; reused by refs, netpol, and sg checks.
+	pod, podErr := client.Clientset.CoreV1().Pods(namespace).Get(ctx, podName, metav1.GetOptions{})
+
+	// Refs check: verify ConfigMap/Secret references exist.
+	if pod != nil {
+		refs := extractPodRefs(pod)
+		if len(refs) == 0 {
+			report.Checks = append(report.Checks, DiagnoseCheckResult{
+				Name: "refs", Severity: SeverityPass, Summary: "no configmap/secret refs",
+			})
+		} else {
+			var missing, optionalMissing []podRef
+			for _, ref := range refs {
+				var getErr error
+				if ref.Kind == "ConfigMap" {
+					_, getErr = client.Clientset.CoreV1().ConfigMaps(namespace).Get(ctx, ref.Name, metav1.GetOptions{})
+				} else {
+					_, getErr = client.Clientset.CoreV1().Secrets(namespace).Get(ctx, ref.Name, metav1.GetOptions{})
+				}
+				if getErr != nil {
+					if apierrors.IsNotFound(getErr) {
+						if ref.Optional {
+							optionalMissing = append(optionalMissing, ref)
+						} else {
+							missing = append(missing, ref)
+						}
+					}
+				}
+			}
+			sev, sum := refsSeverity(missing, optionalMissing, len(refs))
+			report.Checks = append(report.Checks, DiagnoseCheckResult{
+				Name: "refs", Severity: sev, Summary: sum,
+			})
+		}
+	}
+
 	// DNS check: CoreDNS pod health.
 	coreDNSList, err := client.Clientset.CoreV1().Pods("kube-system").List(ctx, metav1.ListOptions{
 		LabelSelector: "k8s-app=kube-dns",
@@ -97,7 +134,6 @@ func runDiagnose(cmd *cobra.Command, args []string) error {
 	}
 
 	// Netpol check.
-	pod, podErr := client.Clientset.CoreV1().Pods(namespace).Get(ctx, podName, metav1.GetOptions{})
 	if podErr != nil {
 		report.Checks = append(report.Checks, DiagnoseCheckResult{
 			Name: "netpol", Severity: SeverityError,
