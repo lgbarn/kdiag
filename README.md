@@ -27,9 +27,12 @@ No memorizing flags. No copy-pasting between terminals. You describe the symptom
 The Claude Code skill isn't just a wrapper — it includes troubleshooting playbooks that Claude follows to systematically work through common failure patterns:
 
 - **Pod failures** — CrashLoopBackOff, Pending, ImagePullBackOff, OOMKilled
-- **Service connectivity** — DNS resolution, endpoint mapping, TCP reachability
+- **Deployment rollouts** — stuck rollouts, failing ReplicaSets, rollback guidance
+- **Service connectivity** — DNS resolution, endpoint mapping, TCP/HTTP reachability
+- **Ingress routing** — backend health, controller status, TLS secrets, ALB/NGINX
 - **Network policies** — which policies affect a pod, what traffic they block
-- **EKS-specific issues** — VPC CNI IP exhaustion, security group rules, node capacity
+- **Node issues** — NotReady, memory/disk/PID pressure, scheduling failures
+- **EKS-specific issues** — VPC CNI IP exhaustion, security group rules, node capacity, VPC endpoints
 - **Cluster health** — node pressure, degraded controllers, warning events
 
 Each playbook knows which kdiag commands to run, in what order, and what the output means.
@@ -47,14 +50,14 @@ go install github.com/lgbarn/kdiag@latest
 ### 2. Install the Claude Code skill
 
 ```sh
-cp skill/SKILL.md ~/.claude/skills/kdiag-SKILL.md
+cp -r skill/kdiag ~/.claude/skills/kdiag
 ```
 
 Or add it to your project's `.claude/settings.json`:
 
 ```json
 {
-  "skills": ["./skill/SKILL.md"]
+  "skills": ["./skill/kdiag"]
 }
 ```
 
@@ -84,12 +87,14 @@ EKS cluster: yes
 
 CHECK     SEVERITY   SUMMARY
 inspect   pass       all 2 container(s) running normally
+refs      pass       all ConfigMap/Secret references exist
 dns       warn       1/2 CoreDNS pod(s) not ready
 netpol    pass       3 NetworkPolicy/ies matched
+ingress   pass       1 Ingress routes to this pod's services
 cni       pass       DaemonSet healthy; 0 node(s) with exhausted IPs
 sg        pass       4 security groups retrieved
 
-Summary: 5 total, 4 pass, 1 warn, 0 fail, 0 error, 0 skipped
+Summary: 7 total, 6 pass, 1 warn, 0 fail, 0 error, 0 skipped
 ```
 
 ### All commands
@@ -104,6 +109,7 @@ Summary: 5 total, 4 pass, 1 warn, 0 fail, 0 error, 0 skipped
 | `kdiag connectivity <src> <dst>` | TCP/HTTP reachability from one pod to another |
 | `kdiag trace <pod> <service>` | Map the full network path: pod → service → endpoints → nodes |
 | `kdiag netpol <pod>` | Which NetworkPolicies affect this pod and what they allow/block |
+| `kdiag ingress <name>` | Inspect Ingress rules, backends, TLS secrets, controller health |
 | `kdiag logs <pod>` | Tail logs from a pod |
 | `kdiag logs deployment/<name>` | Tail logs from all pods in a deployment |
 | `kdiag logs -l app=myapp` | Tail logs by label selector |
@@ -114,6 +120,7 @@ Summary: 5 total, 4 pass, 1 warn, 0 fail, 0 error, 0 skipped
 | `kdiag eks node` | Node metadata: instance type, AZ, ENI/IP capacity |
 | `kdiag eks node --show-pods` | Same + list pods per node (daemonset vs workload breakdown) |
 | `kdiag eks node --show-pods --status EXHAUSTED` | Only show pods on exhausted nodes |
+| `kdiag eks endpoint` | Check VPC endpoints for AWS services (private vs public resolution) |
 
 All commands accept bare pod names (`my-pod`) or type/name format (`pod/my-pod`) — both work everywhere.
 
@@ -184,7 +191,8 @@ EKS commands (`eks cni`, `eks sg`, `eks node`) require AWS credentials and are a
 | capture | create | pods/ephemeralcontainers |
 | logs | get | pods/log |
 | trace | create | pods/ephemeralcontainers |
-| diagnose | get, list | pods, networkpolicies, daemonsets |
+| ingress | get, list | ingresses, services, endpoints, pods, secrets |
+| diagnose | get, list | pods, networkpolicies, daemonsets, ingresses, configmaps, secrets |
 
 ## EKS IAM Requirements
 
@@ -194,6 +202,7 @@ The `eks` subcommands need these IAM permissions on the principal running kdiag:
 - `ec2:DescribeNetworkInterfaces`
 - `ec2:DescribeSecurityGroups`
 - `ec2:DescribeInstanceTypes`
+- `ec2:DescribeVpcEndpoints`
 
 ## License
 
