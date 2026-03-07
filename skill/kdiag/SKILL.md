@@ -1,16 +1,15 @@
 ---
 name: kdiag
 description: >
-  Kubernetes cluster troubleshooting using the kdiag CLI tool. Use this skill whenever the user
-  mentions Kubernetes issues, pod problems, service connectivity failures, DNS resolution problems,
-  CrashLoopBackOff, pending pods, node pressure, network policies blocking traffic, EKS-specific
-  issues (VPC CNI, security groups, ENI exhaustion, VPC endpoints), ingress routing problems,
-  missing ConfigMaps or Secrets, or anything related to debugging workloads in a Kubernetes cluster.
-  Also trigger when the user says "my pod is crashing", "service not reachable", "can't connect to",
-  "pod stuck in pending", "cluster health", "debug my cluster", "troubleshoot", "kdiag",
-  "ingress not working", "endpoint check", "traffic going over the internet", "VPC endpoint",
-  or asks to inspect, diagnose, or trace network paths in Kubernetes. Even vague requests like
-  "something is wrong with my app" in a Kubernetes context should activate this skill.
+  Diagnose and troubleshoot Kubernetes cluster problems using the kdiag CLI. This skill MUST be
+  consulted for ANY Kubernetes operational issue: pods crashing or stuck Pending, deployments not
+  rolling out, services unreachable, DNS failures, ingress not routing, node pressure or capacity
+  problems, missing ConfigMaps/Secrets, network policy conflicts, and EKS-specific issues like
+  VPC CNI errors, ENI/IP exhaustion, security groups, or VPC endpoint verification. Activate on
+  ANY mention of debugging, diagnosing, or investigating problems in a Kubernetes cluster — even
+  vague reports like "my app isn't working" or "something broke in prod" when Kubernetes is involved.
+  Do NOT activate for writing new Kubernetes manifests/operators/Helm charts, setting up CI/CD,
+  provisioning infrastructure with Terraform, or application code development.
 ---
 
 # kdiag - Kubernetes Diagnostics Skill
