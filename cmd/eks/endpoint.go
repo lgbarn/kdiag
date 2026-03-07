@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -24,6 +25,7 @@ type EndpointReport struct {
 var endpointCmd = &cobra.Command{
 	Use:   "endpoint",
 	Short: "Check VPC endpoints for AWS services (STS, EC2, ECR, S3, CloudWatch Logs, EKS API)",
+	Args:  cobra.NoArgs,
 	RunE:  runEndpoint,
 }
 
@@ -131,7 +133,7 @@ func extractHostname(host string) string {
 	}
 	// If host has no scheme, url.Parse won't split host:port correctly.
 	// Prepend a scheme if missing so net/url can parse it.
-	if len(host) > 0 && host[0] != 'h' {
+	if !strings.Contains(host, "://") {
 		host = "https://" + host
 	}
 	u, err := url.Parse(host)
