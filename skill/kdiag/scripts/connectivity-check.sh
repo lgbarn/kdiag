@@ -8,13 +8,13 @@ set -euo pipefail
 
 SRC=""
 DST=""
-NAMESPACE_FLAG=""
-PORT_FLAG=""
+NS_FLAGS=()
+PORT_FLAGS=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    -n|--namespace) NAMESPACE_FLAG="-n $2"; shift 2 ;;
-    -p|--port)      PORT_FLAG="-p $2"; shift 2 ;;
+    -n|--namespace) NS_FLAGS+=("-n" "$2"); shift 2 ;;
+    -p|--port)      PORT_FLAGS+=("-p" "$2"); shift 2 ;;
     -*)             echo "Unknown flag: $1" >&2; exit 1 ;;
     *)
       if [[ -z "$SRC" ]]; then SRC="$1"
@@ -30,19 +30,17 @@ if [[ -z "$SRC" || -z "$DST" ]]; then
   exit 1
 fi
 
-FLAGS="$NAMESPACE_FLAG"
-
 echo "=== Step 1: Trace network path ==="
-kdiag trace "$SRC" "$DST" $FLAGS || true
+kdiag trace "$SRC" "$DST" "${NS_FLAGS[@]}" || true
 
 echo ""
 echo "=== Step 2: Test connectivity ==="
-kdiag connectivity "$SRC" "$DST" $FLAGS $PORT_FLAG || true
+kdiag connectivity "$SRC" "$DST" "${NS_FLAGS[@]}" "${PORT_FLAGS[@]}" || true
 
 echo ""
 echo "=== Step 3: DNS resolution ==="
-kdiag dns "$DST" $FLAGS || true
+kdiag dns "$DST" "${NS_FLAGS[@]}" || true
 
 echo ""
 echo "=== Step 4: Network policies on source ==="
-kdiag netpol "$SRC" $FLAGS || true
+kdiag netpol "$SRC" "${NS_FLAGS[@]}" || true
