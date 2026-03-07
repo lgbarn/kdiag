@@ -4,12 +4,13 @@ description: >
   Kubernetes cluster troubleshooting using the kdiag CLI tool. Use this skill whenever the user
   mentions Kubernetes issues, pod problems, service connectivity failures, DNS resolution problems,
   CrashLoopBackOff, pending pods, node pressure, network policies blocking traffic, EKS-specific
-  issues (VPC CNI, security groups, ENI exhaustion), or anything related to debugging workloads
-  in a Kubernetes cluster. Also trigger when the user says "my pod is crashing", "service not
-  reachable", "can't connect to", "pod stuck in pending", "cluster health", "debug my cluster",
-  "troubleshoot", "kdiag", or asks to inspect, diagnose, or trace network paths in Kubernetes.
-  Even vague requests like "something is wrong with my app" in a Kubernetes context should
-  activate this skill.
+  issues (VPC CNI, security groups, ENI exhaustion, VPC endpoints), ingress routing problems,
+  missing ConfigMaps or Secrets, or anything related to debugging workloads in a Kubernetes cluster.
+  Also trigger when the user says "my pod is crashing", "service not reachable", "can't connect to",
+  "pod stuck in pending", "cluster health", "debug my cluster", "troubleshoot", "kdiag",
+  "ingress not working", "endpoint check", "traffic going over the internet", "VPC endpoint",
+  or asks to inspect, diagnose, or trace network paths in Kubernetes. Even vague requests like
+  "something is wrong with my app" in a Kubernetes context should activate this skill.
 ---
 
 # kdiag - Kubernetes Diagnostics Skill
@@ -22,9 +23,9 @@ commands, interpreting their output, and guiding the user to a resolution.
 
 When the user reports an issue, gather just enough context to start:
 
-1. **What's the symptom?** (pod crashing, service unreachable, deployment stuck, etc.)
+1. **What's the symptom?** (pod crashing, service unreachable, deployment stuck, ingress broken, etc.)
 2. **What namespace?** (default if not specified)
-3. **What resource?** (pod name, service name, deployment name)
+3. **What resource?** (pod name, service name, deployment name, ingress name)
 4. **EKS cluster?** If EKS commands fail with credential errors, ask: "Which AWS profile should I use? (e.g., `--profile myprofile`)"
 
 Don't over-interview. If the user gives you a pod name, start diagnosing immediately. You can
@@ -46,13 +47,14 @@ A bare name always defaults to pod.
 | Command | Purpose | Example |
 |---------|---------|---------|
 | `kdiag health` | Cluster-wide health overview | `kdiag health -o json` |
-| `kdiag diagnose <pod>` | Run all checks against a pod | `kdiag diagnose my-pod -n prod` |
+| `kdiag diagnose <pod>` | Run all checks against a pod (inspect, refs, dns, netpol, ingress, EKS) | `kdiag diagnose my-pod -n prod` |
 | `kdiag inspect <name>` | Deep-dive into a resource (defaults to pod) | `kdiag inspect my-pod` |
 | `kdiag inspect <type/name>` | Deep-dive into a specific resource type | `kdiag inspect deployment/my-app` |
 | `kdiag dns <pod-or-service>` | DNS resolution + CoreDNS health | `kdiag dns my-service` |
 | `kdiag connectivity <src> <dst>` | Test network connectivity | `kdiag connectivity pod-a svc-b -p 80` |
 | `kdiag trace <src-pod> <dst-svc>` | Map the full network path | `kdiag trace pod-a my-service` |
 | `kdiag netpol <pod>` | Show NetworkPolicies affecting a pod | `kdiag netpol my-pod` |
+| `kdiag ingress <name>` | Inspect Ingress rules, backends, TLS, controller health | `kdiag ingress my-ingress -n prod` |
 | `kdiag logs <pod>` | Tail logs from a single pod | `kdiag logs my-pod` |
 | `kdiag logs deployment/<name>` | Tail logs from all pods in a deployment | `kdiag logs deployment/my-app` |
 | `kdiag logs -l <selector>` | Tail logs from matching pods | `kdiag logs -l app=myapp` |
@@ -63,16 +65,56 @@ A bare name always defaults to pod.
 | `kdiag eks sg <pod>` | Security groups for a pod | `kdiag eks sg my-pod` |
 | `kdiag eks node` | Node ENI/IP capacity | `kdiag eks node` |
 | `kdiag eks node --show-pods` | Pods per node (daemonset vs workload) | `kdiag eks node --show-pods` |
-| `kdiag eks node --show-pods --status EXHAUSTED` | Pods only on exhausted nodes | `kdiag eks node --show-pods --status EXHAUSTED` |
 | `kdiag eks endpoint` | Check VPC endpoints for AWS services | `kdiag eks endpoint` |
-| `kdiag ingress <name>` | Inspect Ingress rules, backends, TLS, controller | `kdiag ingress my-ingress -n prod` |
+
+### Diagnose Checks
+
+The `diagnose` command runs these checks automatically and reports pass/warn/fail for each:
+
+| Check | What it verifies |
+|-------|-----------------|
+| `inspect` | Pod status, container states, restart counts, events |
+| `refs` | ConfigMap and Secret references exist (missing = fail, optional missing = warn) |
+| `dns` | CoreDNS pod health |
+| `netpol` | NetworkPolicies affecting the pod |
+| `ingress` | Ingress rules routing to this pod's services |
+| `cni` | aws-node DaemonSet health + IP exhaustion (EKS only) |
+| `sg` | Security groups attached to pod's ENI (EKS only) |
+
+## Diagnostic Scripts
+
+For common multi-step workflows, use the bundled scripts instead of running commands manually.
+These scripts run the right commands in the right order and handle errors gracefully.
+
+### Pod Triage
+When a pod is failing (crashing, pending, erroring), run the full triage:
+```bash
+bash <skill-path>/scripts/pod-triage.sh <pod-name> -n <namespace>
+```
+This runs: diagnose → inspect → logs (if restarts detected). On EKS, add `--profile <name>`.
+
+### Connectivity Check
+When a service is unreachable from a pod:
+```bash
+bash <skill-path>/scripts/connectivity-check.sh <source-pod> <service> -n <namespace> -p <port>
+```
+This runs: trace → connectivity → dns → netpol on the source pod.
+
+### EKS Health
+For a comprehensive EKS cluster health check:
+```bash
+bash <skill-path>/scripts/eks-health.sh --profile <name>
+```
+This runs: health → eks cni → eks node → eks endpoint.
 
 ## Troubleshooting Playbooks
 
-Follow these decision trees based on the symptom. Always use `-o json` when you need to parse
+Follow these decision trees based on the symptom. Use `-o json` when you need to parse
 output programmatically, and default table format when showing results to the user.
 
 ### Pod Not Running (CrashLoopBackOff, Pending, Failed, etc.)
+
+Run the pod triage script, or manually:
 
 1. Run `kdiag diagnose <pod>` to get a quick pass/warn/fail overview
 2. Run `kdiag inspect <pod>` to see container states, restart counts, conditions, and events
@@ -83,8 +125,11 @@ output programmatically, and default table format when showing results to the us
    - **OOMKilled**: Container terminated reason will show OOMKilled - suggest increasing memory limits
 4. If the pod is owned by a Deployment/StatefulSet/DaemonSet, also inspect the controller:
    `kdiag inspect deployment/<name>` to check replica status and rollout conditions
+5. If diagnose shows `refs: fail`, a ConfigMap or Secret referenced by the pod doesn't exist — check the name and namespace
 
 ### Service Connectivity Issues
+
+Run the connectivity check script, or manually:
 
 1. Run `kdiag trace <source-pod> <service>` to map the full network path and verify endpoints exist
 2. Run `kdiag connectivity <source-pod> <service>` to test actual TCP/HTTP connectivity
@@ -103,6 +148,18 @@ output programmatically, and default table format when showing results to the us
    - Is the query time unusually high (>100ms suggests issues)?
 3. If CoreDNS is unhealthy, check with `kdiag inspect <coredns-pod> -n kube-system`
 
+### Ingress Issues
+
+1. Run `kdiag ingress <name>` to check:
+   - Ingress class and controller type (ALB, NGINX, etc.)
+   - Backend services exist and have ready endpoints
+   - TLS secrets exist
+   - Controller pod health
+2. If backends show 0 ready endpoints: check that the Service selector matches pod labels
+3. If TLS secret is missing: verify the secret name and namespace
+4. For ALB issues: check aws-load-balancer-controller pods in kube-system
+5. For NGINX issues: check ingress-nginx pods in ingress-nginx namespace
+
 ### Cluster-Wide Health Check
 
 1. Run `kdiag health` for a full overview:
@@ -114,7 +171,10 @@ output programmatically, and default table format when showing results to the us
 
 ### EKS-Specific Issues
 
-These commands require the cluster to be EKS and valid AWS credentials:
+These commands require the cluster to be EKS and valid AWS credentials.
+Use `--profile` and `--region` flags if the default AWS credentials don't match the cluster.
+
+Run the EKS health script for a full check, or individual commands:
 
 1. **VPC CNI issues** (pod IP assignment failures): `kdiag eks cni`
    - Checks aws-node DaemonSet health
@@ -128,20 +188,6 @@ These commands require the cluster to be EKS and valid AWS credentials:
    - Lists every pod on exhausted nodes, separated into daemonset vs workload
    - Shows namespace breakdown so you can spot which namespaces dominate
    - Key insight: if all pods are daemonsets and zero are workloads, the node type is too small
-
-Use `--profile` and `--region` flags if the default AWS credentials don't match the cluster.
-
-### Ingress Issues
-
-1. Run `kdiag ingress <name>` to check:
-   - Ingress class and controller type (ALB, NGINX, etc.)
-   - Backend services exist and have ready endpoints
-   - TLS secrets exist
-   - Controller pod health
-2. If backends show 0 ready endpoints: check that the Service selector matches pod labels
-3. If TLS secret is missing: verify the secret name and namespace
-4. For ALB issues: check aws-load-balancer-controller pods in kube-system
-5. For NGINX issues: check ingress-nginx pods in ingress-nginx namespace
 
 ### VPC Endpoint Issues
 
