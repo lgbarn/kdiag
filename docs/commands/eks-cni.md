@@ -20,8 +20,8 @@ Fargate nodes and nodes without a parseable `providerID` or `node.kubernetes.io/
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--aws-profile` | — | AWS shared config profile to use |
-| `--aws-region` | auto-detected | AWS region (parsed from the EKS API server endpoint when omitted) |
+| `--profile` | — | AWS shared config profile to use |
+| `--region` | auto-detected | AWS region (parsed from the EKS API server endpoint when omitted) |
 
 All [global flags](../README.md#global-flags) also apply (`--output`, `--timeout`, `--verbose`, etc.).
 
@@ -36,7 +36,7 @@ kdiag eks cni
 **Use a specific AWS profile:**
 
 ```bash
-kdiag eks cni --aws-profile staging
+kdiag eks cni --profile staging
 ```
 
 **Get structured JSON for scripting or CI:**
@@ -48,7 +48,7 @@ kdiag eks cni -o json
 **Override the detected region:**
 
 ```bash
-kdiag eks cni --aws-region us-west-2
+kdiag eks cni --region us-west-2
 ```
 
 **Show verbose output including skipped-node warnings:**

@@ -39,8 +39,8 @@ Unlike `kdiag eks cni`, this command does not read the aws-node DaemonSet or app
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--aws-profile` | — | AWS shared config profile to use |
-| `--aws-region` | auto-detected | AWS region (parsed from the EKS API server endpoint when omitted) |
+| `--profile` | — | AWS shared config profile to use |
+| `--region` | auto-detected | AWS region (parsed from the EKS API server endpoint when omitted) |
 
 All [global flags](../README.md#global-flags) also apply (`--output`, `--timeout`, `--verbose`, etc.).
 
@@ -61,7 +61,7 @@ kdiag eks node -o json
 **Use a specific AWS profile and region:**
 
 ```bash
-kdiag eks node --aws-profile prod --aws-region us-east-1
+kdiag eks node --profile prod --region us-east-1
 ```
 
 **Show verbose output including per-node warnings:**

@@ -47,8 +47,8 @@ func Init(
 	timeout = tout
 	verbose = verb
 
-	EksCmd.PersistentFlags().StringVar(&awsProfile, "aws-profile", "", "AWS shared config profile to use")
-	EksCmd.PersistentFlags().StringVar(&awsRegion, "aws-region", "", "AWS region override (auto-detected from EKS endpoint when omitted)")
+	EksCmd.PersistentFlags().StringVar(&awsProfile, "profile", "", "AWS shared config profile to use (like terraform -profile)")
+	EksCmd.PersistentFlags().StringVar(&awsRegion, "region", "", "AWS region override (auto-detected from EKS endpoint when omitted)")
 
 	root.AddCommand(EksCmd)
 }
@@ -77,6 +77,9 @@ func isVerbose() bool {
 	return *verbose
 }
 
+// GetAWSProfile returns the current --profile flag value.
+func GetAWSProfile() string { return awsProfile }
+
 // requireEKS returns an error when host is not an EKS cluster endpoint.
 func requireEKS(host string) error {
 	if !awspkg.IsEKSCluster(host) {
@@ -85,7 +88,7 @@ func requireEKS(host string) error {
 	return nil
 }
 
-// resolveRegion returns the AWS region to use: the explicit --aws-region flag
+// resolveRegion returns the AWS region to use: the explicit --region flag
 // value takes precedence, otherwise the region is parsed from the EKS host.
 func resolveRegion(host string) string {
 	if awsRegion != "" {

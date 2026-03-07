@@ -85,7 +85,7 @@ root.go: cmd.Init() call
   │
   └─ eks.Init(root, configFlags, outputFormat, timeout, verbose)
        ├─ stores shared flag pointers
-       ├─ registers --aws-profile and --aws-region as persistent flags on EksCmd
+       ├─ registers --profile and --region as persistent flags on EksCmd
        └─ root.AddCommand(EksCmd)
 ```
 
@@ -99,7 +99,7 @@ Every `eks` subcommand calls `requireEKS(host)` before making any AWS API calls.
 
 #### EC2 client construction
 
-The shared `newEC2Client(ctx, host)` helper resolves the AWS region (explicit `--aws-region` flag or parsed from the EKS host via `pkg/aws.RegionFromHost`), then calls `pkg/aws.NewEC2Client`. All three subcommands use this helper.
+The shared `newEC2Client(ctx, host)` helper resolves the AWS region (explicit `--region` flag or parsed from the EKS host via `pkg/aws.RegionFromHost`), then calls `pkg/aws.NewEC2Client`. All three subcommands use this helper.
 
 ### logs.go, inspect.go, health.go
 

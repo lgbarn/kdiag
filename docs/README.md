@@ -147,7 +147,7 @@ kdiag eks sg my-pod -n production -o json
 
 ```bash
 kdiag eks node
-kdiag eks node --aws-profile staging -o json
+kdiag eks node --profile staging -o json
 ```
 
 ## Global Flags
@@ -169,8 +169,8 @@ The following flags apply only to `eks` subcommands.
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--aws-profile` | — | AWS shared config profile (`~/.aws/config`) |
-| `--aws-region` | auto-detected | AWS region; auto-detected from the EKS API server endpoint when omitted |
+| `--profile` | — | AWS shared config profile (`~/.aws/config`) |
+| `--region` | auto-detected | AWS region; auto-detected from the EKS API server endpoint when omitted |
 
 ## RBAC Requirements
 

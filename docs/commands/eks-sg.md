@@ -24,8 +24,8 @@ Fargate pods are rejected immediately — Fargate manages networking outside EC2
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--aws-profile` | — | AWS shared config profile to use |
-| `--aws-region` | auto-detected | AWS region (parsed from the EKS API server endpoint when omitted) |
+| `--profile` | — | AWS shared config profile to use |
+| `--region` | auto-detected | AWS region (parsed from the EKS API server endpoint when omitted) |
 
 All [global flags](../README.md#global-flags) also apply (`--output`, `--timeout`, `--verbose`, etc.).
 
@@ -52,7 +52,7 @@ kdiag eks sg my-pod -o json
 **Use a named AWS profile:**
 
 ```bash
-kdiag eks sg my-pod --aws-profile prod-readonly
+kdiag eks sg my-pod --profile prod-readonly
 ```
 
 ## Output
