@@ -13,6 +13,7 @@ type mockEC2API struct {
 	describeInstanceTypes        func(ctx context.Context, params *ec2.DescribeInstanceTypesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeInstanceTypesOutput, error)
 	describeNetworkInterfaces    func(ctx context.Context, params *ec2.DescribeNetworkInterfacesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeNetworkInterfacesOutput, error)
 	describeSecurityGroups       func(ctx context.Context, params *ec2.DescribeSecurityGroupsInput, optFns ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error)
+	describeVpcEndpoints         func(ctx context.Context, params *ec2.DescribeVpcEndpointsInput, optFns ...func(*ec2.Options)) (*ec2.DescribeVpcEndpointsOutput, error)
 }
 
 func (m *mockEC2API) DescribeInstances(ctx context.Context, params *ec2.DescribeInstancesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
@@ -41,4 +42,11 @@ func (m *mockEC2API) DescribeSecurityGroups(ctx context.Context, params *ec2.Des
 		return m.describeSecurityGroups(ctx, params, optFns...)
 	}
 	return &ec2.DescribeSecurityGroupsOutput{}, nil
+}
+
+func (m *mockEC2API) DescribeVpcEndpoints(ctx context.Context, params *ec2.DescribeVpcEndpointsInput, optFns ...func(*ec2.Options)) (*ec2.DescribeVpcEndpointsOutput, error) {
+	if m.describeVpcEndpoints != nil {
+		return m.describeVpcEndpoints(ctx, params, optFns...)
+	}
+	return &ec2.DescribeVpcEndpointsOutput{}, nil
 }
