@@ -135,75 +135,48 @@ func runCNI(cmd *cobra.Command, args []string) error {
 	// Determine if prefix delegation is enabled.
 	prefixDelegation := cniConfig.PrefixDelegation
 
-	eligible, skipped := ClassifyNodes(nodeList.Items)
-	uniqueTypes := map[string]struct{}{}
+	eligible, classSkipped := ClassifyNodes(nodeList.Items)
+
+	// 6-7. Build NodeInput slice and compute utilization via shared function.
+	nodeInputs := make([]awspkg.NodeInput, 0, len(eligible))
 	for _, en := range eligible {
-		uniqueTypes[en.InstanceType] = struct{}{}
+		nodeInputs = append(nodeInputs, awspkg.NodeInput{
+			Name:         en.Name,
+			InstanceID:   en.InstanceID,
+			InstanceType: en.InstanceType,
+		})
 	}
 
-	// 6. Batch query instance type limits.
-	typeList := uniqueKeys(uniqueTypes)
-
-	limitsMap, err := awspkg.GetInstanceTypeLimits(ctx, ec2Client, typeList)
+	utils, nodeSkipped, err := awspkg.ComputeNodeUtilization(ctx, ec2Client, nodeInputs, prefixDelegation)
 	if err != nil {
-		return fmt.Errorf("failed to get instance type limits: %w", err)
+		return fmt.Errorf("compute node utilization: %w", err)
 	}
 
-	// 7. Per-node ENI query and utilization calculation.
 	var nodes []NodeCapacity
 	var ipExhausted []string
+	skipped := classSkipped
 
-	for _, en := range eligible {
-		eniInfo, err := awspkg.ListNodeENIs(ctx, ec2Client, en.InstanceID)
-		if err != nil {
-			if isVerbose() {
-				fmt.Fprintf(os.Stderr, "[kdiag] warning: could not list ENIs for node %s (%s): %v\n",
-					en.Name, en.InstanceID, err)
-			}
-			skipped = append(skipped, SkippedNode{
-				NodeName: en.Name,
-				Reason:   fmt.Sprintf("ENI query failed: %v", err),
-			})
-			continue
+	for _, s := range nodeSkipped {
+		if isVerbose() {
+			fmt.Fprintf(os.Stderr, "[kdiag] warning: skipped node %s: %s\n", s.NodeName, s.Reason)
 		}
+		skipped = append(skipped, SkippedNode{NodeName: s.NodeName, Reason: s.Reason})
+	}
 
-		limits := limitsMap[en.InstanceType]
-		var maxENIs, maxIPsPerENI int32
-		var maxTotalIPs int
-		if limits != nil {
-			maxENIs = limits.MaxENIs
-			maxIPsPerENI = limits.MaxIPsPerENI
-			// 8. If prefix delegation, multiply capacity by 16.
-			if prefixDelegation {
-				maxTotalIPs = int(maxENIs) * int(maxIPsPerENI) * 16
-			} else {
-				maxTotalIPs = int(maxENIs) * int(maxIPsPerENI)
-			}
-		}
-
-		currentENIs := len(eniInfo.ENIs)
-		currentIPs := eniInfo.TotalIPs
-
-		utilPct := 0
-		if maxTotalIPs > 0 {
-			utilPct = (currentIPs * 100) / maxTotalIPs
-		}
-
-		// Exhausted if >= 85%.
-		exhausted := utilPct >= 85
+	for _, u := range utils {
+		exhausted := u.Status == "EXHAUSTED"
 		if exhausted {
-			ipExhausted = append(ipExhausted, en.Name)
+			ipExhausted = append(ipExhausted, u.NodeName)
 		}
-
 		nodes = append(nodes, NodeCapacity{
-			NodeName:     en.Name,
-			InstanceType: en.InstanceType,
-			MaxENIs:      maxENIs,
-			MaxIPsPerENI: maxIPsPerENI,
-			MaxTotalIPs:  maxTotalIPs,
-			CurrentENIs:  currentENIs,
-			CurrentIPs:   currentIPs,
-			Utilization:  strconv.Itoa(utilPct),
+			NodeName:     u.NodeName,
+			InstanceType: u.InstanceType,
+			MaxENIs:      u.MaxENIs,
+			MaxIPsPerENI: u.MaxIPsPerENI,
+			MaxTotalIPs:  u.MaxTotalIPs,
+			CurrentENIs:  u.CurrentENIs,
+			CurrentIPs:   u.CurrentIPs,
+			Utilization:  strconv.Itoa(u.UtilizationPct),
 			Exhausted:    exhausted,
 		})
 	}

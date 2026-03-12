@@ -336,37 +336,29 @@ func printDiagnoseTable(report DiagnoseReport) error {
 func countExhaustedNodes(ctx context.Context, ec2Client awspkg.EC2API, nodes []corev1.Node) (int, error) {
 	eligible, _ := eks.ClassifyNodes(nodes)
 
-	uniqueTypes := map[string]struct{}{}
+	nodeInputs := make([]awspkg.NodeInput, 0, len(eligible))
 	for _, en := range eligible {
-		uniqueTypes[en.InstanceType] = struct{}{}
+		nodeInputs = append(nodeInputs, awspkg.NodeInput{
+			Name:         en.Name,
+			InstanceID:   en.InstanceID,
+			InstanceType: en.InstanceType,
+		})
 	}
 
-	typeList := make([]string, 0, len(uniqueTypes))
-	for t := range uniqueTypes {
-		typeList = append(typeList, t)
-	}
-
-	limitsMap, err := awspkg.GetInstanceTypeLimits(ctx, ec2Client, typeList)
+	utils, skipped, err := awspkg.ComputeNodeUtilization(ctx, ec2Client, nodeInputs, false)
 	if err != nil {
-		return 0, fmt.Errorf("failed to get instance type limits: %w", err)
+		return 0, fmt.Errorf("compute node utilization: %w", err)
+	}
+
+	for _, s := range skipped {
+		if IsVerbose() {
+			fmt.Fprintf(os.Stderr, "[kdiag] warning: skipped node %s: %s\n", s.NodeName, s.Reason)
+		}
 	}
 
 	exhausted := 0
-	for _, en := range eligible {
-		eniInfo, err := awspkg.ListNodeENIs(ctx, ec2Client, en.InstanceID)
-		if err != nil {
-			continue
-		}
-		limits := limitsMap[en.InstanceType]
-		if limits == nil {
-			continue
-		}
-		maxTotalIPs := int(limits.MaxENIs) * int(limits.MaxIPsPerENI)
-		if maxTotalIPs == 0 {
-			continue
-		}
-		utilPct := (eniInfo.TotalIPs * 100) / maxTotalIPs
-		if utilPct >= 85 {
+	for _, u := range utils {
+		if u.Status == "EXHAUSTED" {
 			exhausted++
 		}
 	}

@@ -122,76 +122,51 @@ func runNode(cmd *cobra.Command, args []string) error {
 	// 5. Classify each node.
 	eligible, skipped := ClassifyNodes(nodeList.Items)
 	report.Skipped = append(report.Skipped, skipped...)
-	uniqueTypes := map[string]struct{}{}
+
+	// Build a lookup map from node name to EligibleNode for ComputeType/Note.
+	eligibleByName := make(map[string]EligibleNode, len(eligible))
 	for _, en := range eligible {
-		uniqueTypes[en.InstanceType] = struct{}{}
+		eligibleByName[en.Name] = en
 	}
 
-	// 7. Batch-query instance type limits.
-	typeList := uniqueKeys(uniqueTypes)
+	// 7-9. Build NodeInput slice and compute utilization via shared function.
+	nodeInputs := make([]awspkg.NodeInput, 0, len(eligible))
+	for _, en := range eligible {
+		nodeInputs = append(nodeInputs, awspkg.NodeInput{
+			Name:         en.Name,
+			InstanceID:   en.InstanceID,
+			InstanceType: en.InstanceType,
+		})
+	}
 
-	limitsMap, err := awspkg.GetInstanceTypeLimits(ctx, ec2Client, typeList)
+	utils, nodeSkipped, err := awspkg.ComputeNodeUtilization(ctx, ec2Client, nodeInputs, false)
 	if err != nil {
-		return fmt.Errorf("failed to get instance type limits: %w", err)
+		return fmt.Errorf("compute node utilization: %w", err)
 	}
 
-	// 8-9. Per-node ENI query and utilization calculation.
-	for _, en := range eligible {
-		eniInfo, err := awspkg.ListNodeENIs(ctx, ec2Client, en.InstanceID)
-		if err != nil {
-			if isVerbose() {
-				fmt.Fprintf(os.Stderr, "[kdiag] warning: could not list ENIs for node %s (%s): %v\n",
-					en.Name, en.InstanceID, err)
-			}
-			report.Skipped = append(report.Skipped, SkippedNode{
-				NodeName: en.Name,
-				Reason:   fmt.Sprintf("ENI query failed: %v", err),
-			})
-			continue
+	for _, s := range nodeSkipped {
+		if isVerbose() {
+			fmt.Fprintf(os.Stderr, "[kdiag] warning: skipped node %s: %s\n", s.NodeName, s.Reason)
 		}
+		report.Skipped = append(report.Skipped, SkippedNode{NodeName: s.NodeName, Reason: s.Reason})
+	}
 
-		limits := limitsMap[en.InstanceType]
-		if limits == nil {
-			report.Skipped = append(report.Skipped, SkippedNode{
-				NodeName: en.Name,
-				Reason:   fmt.Sprintf("instance type limits not available for %s", en.InstanceType),
-			})
-			continue
-		}
-		maxENIs := limits.MaxENIs
-		maxIPsPerENI := limits.MaxIPsPerENI
-		maxTotalIPs := int(maxENIs) * int(maxIPsPerENI)
-
-		currentENIs := len(eniInfo.ENIs)
-		currentIPs := eniInfo.TotalIPs
-
-		utilPct := 0
-		if maxTotalIPs > 0 {
-			utilPct = (currentIPs * 100) / maxTotalIPs
-		}
-
-		status := "OK"
-		if utilPct >= 85 {
-			status = "EXHAUSTED"
-		} else if utilPct >= 70 {
-			status = "WARNING"
-		}
-
-		if status == "EXHAUSTED" {
+	for _, u := range utils {
+		if u.Status == "EXHAUSTED" {
 			report.Summary.ExhaustedNodes++
 		}
-
+		en := eligibleByName[u.NodeName]
 		report.Nodes = append(report.Nodes, NodeENIStatus{
-			NodeName:     en.Name,
-			InstanceType: en.InstanceType,
+			NodeName:     u.NodeName,
+			InstanceType: u.InstanceType,
 			ComputeType:  string(en.ComputeType),
-			MaxENIs:      maxENIs,
-			MaxIPsPerENI: maxIPsPerENI,
-			CurrentENIs:  currentENIs,
-			CurrentIPs:   currentIPs,
-			MaxTotalIPs:  maxTotalIPs,
-			Utilization:  strconv.Itoa(utilPct),
-			Status:       status,
+			MaxENIs:      u.MaxENIs,
+			MaxIPsPerENI: u.MaxIPsPerENI,
+			CurrentENIs:  u.CurrentENIs,
+			CurrentIPs:   u.CurrentIPs,
+			MaxTotalIPs:  u.MaxTotalIPs,
+			Utilization:  strconv.Itoa(u.UtilizationPct),
+			Status:       u.Status,
 			Note:         en.Note,
 		})
 	}
