@@ -52,6 +52,9 @@ kdiag diagnose my-pod -o json
 
 # With verbose logging
 kdiag diagnose my-pod -v
+
+# Use a specific AWS profile for EKS checks
+kdiag diagnose my-pod --profile staging
 ```
 
 ## JSON Output

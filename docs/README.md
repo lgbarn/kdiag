@@ -165,11 +165,6 @@ These flags apply to every command.
 | `--image-pull-secret` | — | Pull secret for private registries |
 | `--timeout` | `30s` | Timeout for container start operations |
 | `-v`, `--verbose` | false | Print diagnostic steps to stderr |
-
-The following flags apply only to `eks` subcommands.
-
-| Flag | Default | Description |
-|------|---------|-------------|
 | `--profile` | — | AWS shared config profile (`~/.aws/config`) |
 | `--region` | auto-detected | AWS region; auto-detected from the EKS API server endpoint when omitted |
 

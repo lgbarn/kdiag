@@ -1,7 +1,7 @@
 {
   "current_phase": 7,
-  "position": "Phase 7 build complete",
-  "status": "complete",
+  "position": "Milestone shipped",
+  "status": "shipped",
   "phases": {
     "1": { "status": "complete" },
     "2": { "status": "complete" },

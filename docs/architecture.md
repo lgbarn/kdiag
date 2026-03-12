@@ -83,11 +83,12 @@ Because `cmd/eks/` is a separate package, it cannot access the root command's fl
 ```
 root.go: cmd.Init() call
   │
-  └─ eks.Init(root, configFlags, outputFormat, timeout, verbose)
-       ├─ stores shared flag pointers
-       ├─ registers --profile and --region as persistent flags on EksCmd
+  └─ eks.Init(root, configFlags, outputFormat, timeout, verbose, profile, region)
+       ├─ stores shared flag pointers (including --profile and --region)
        └─ root.AddCommand(EksCmd)
 ```
+
+The `--profile` and `--region` flags are registered as persistent flags on `rootCmd` so they are inherited by all subcommands, including `diagnose`. This lets any command that creates an AWS client use the same profile without requiring the `AWS_PROFILE` environment variable.
 
 This pattern lets each `eks` subcommand call `getOutputFormat()`, `getTimeout()`, and `isVerbose()` as package-local accessors backed by the same underlying flag values as the rest of the CLI.
 
