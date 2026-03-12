@@ -57,7 +57,7 @@ This roadmap addresses 9 actionable concerns identified in the kdiag v0.3.0 code
 
 ---
 
-## Phase 7: Isolated Fixes
+## Phase 7: Isolated Fixes ✅ COMPLETE
 
 **Scope:** Three small, independent fixes with no file dependencies on phases 5–6: remove the redundant RBAC pre-flight in the shell ephemeral path, enforce the `--status`/`--show-pods` co-requirement, and handle the discarded write error in `cmd/eks/node.go`. These can be applied in any order within the phase.
 
