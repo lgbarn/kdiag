@@ -91,6 +91,10 @@ func init() {
 }
 
 func runNode(cmd *cobra.Command, args []string) error {
+	if statusFilter != "" && !showPods {
+		return fmt.Errorf("--status requires --show-pods")
+	}
+
 	// 1. Build Kubernetes client and verify EKS.
 	k8sClient, err := k8spkg.NewClient(configFlags)
 	if err != nil {
