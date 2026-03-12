@@ -124,7 +124,7 @@ Summary: 7 total, 6 pass, 1 warn, 0 fail, 0 error, 0 skipped
 
 All commands accept bare pod names (`my-pod`) or type/name format (`pod/my-pod`) — both work everywhere.
 
-Every command supports `--output json` for machine-readable output, `--namespace`, `--context`, and `--kubeconfig` flags.
+Every command supports `--output json` for machine-readable output, `--namespace`, `--context`, `--kubeconfig`, `--profile` (AWS profile), and `--region` (AWS region) flags.
 
 ## Installation
 

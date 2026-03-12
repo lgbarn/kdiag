@@ -2,6 +2,25 @@
 
 All notable changes to kdiag are documented in this file.
 
+## [0.4.0] - 2026-03-11
+
+### Added
+- `--profile` and `--region` flags on all commands (moved from EKS-only to global flags)
+- IPv6, loopback, and link-local address classification in `diagnose` and `eks endpoint`
+- `--status` flag validation: now requires `--show-pods` and must be one of EXHAUSTED, WARNING, or OK
+- Bounded concurrency for ENI queries — parallel node lookups with configurable goroutine pool (default 10)
+
+### Fixed
+- Duplicate RBAC permission check removed from `shell` ephemeral container error path
+- `EnrichWithVpcEndpoints` now returns errors instead of silently swallowing them
+- `findIngressesForPod` returns errors instead of silently returning nil
+- Discarded `WriteString` error in `eks node` summary output now handled
+- Dead `IsForbidden` branch in `shell` command collapsed (was unreachable after pre-flight RBAC check)
+- Removed dead `uniqueKeys` function and unnecessary `node := node` loop variable captures
+
+### Changed
+- Extracted shared `ComputeNodeUtilization` function — eliminates triplicate ENI utilization logic across `eks node`, `eks cni`, and `diagnose`
+
 ## [0.3.0] - 2026-03-07
 
 ### Added
