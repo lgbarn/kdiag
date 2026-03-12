@@ -416,3 +416,95 @@ func TestComputeNodeUtilization_EmptyInput(t *testing.T) {
 		t.Errorf("len(skipped) = %d, want 0", len(skipped))
 	}
 }
+
+func TestComputeNodeUtilization_ConcurrentMultiNode(t *testing.T) {
+	nodes := []NodeInput{
+		{Name: "node-1", InstanceID: "i-001", InstanceType: "m5.large"},
+		{Name: "node-2", InstanceID: "i-002", InstanceType: "m5.large"},
+		{Name: "node-3", InstanceID: "i-003", InstanceType: "m5.large"},
+		{Name: "node-4", InstanceID: "i-004", InstanceType: "m5.large"},
+		{Name: "node-5", InstanceID: "i-005", InstanceType: "m5.large"},
+	}
+
+	mock := &mockEC2API{
+		describeInstanceTypes: m5LargeMock(),
+		describeNetworkInterfaces: func(_ context.Context, _ *ec2.DescribeNetworkInterfacesInput, _ ...func(*ec2.Options)) (*ec2.DescribeNetworkInterfacesOutput, error) {
+			devIdx := int32(0)
+			return &ec2.DescribeNetworkInterfacesOutput{
+				NetworkInterfaces: []types.NetworkInterface{
+					{
+						NetworkInterfaceId: ptrStr("eni-001"),
+						Attachment:         &types.NetworkInterfaceAttachment{DeviceIndex: &devIdx},
+						PrivateIpAddresses: make([]types.NetworkInterfacePrivateIpAddress, 2),
+					},
+				},
+			}, nil
+		},
+	}
+
+	utils, skipped, err := ComputeNodeUtilization(context.Background(), mock, nodes, false, 3)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(skipped) != 0 {
+		t.Errorf("len(skipped) = %d, want 0", len(skipped))
+	}
+	if len(utils) != 5 {
+		t.Fatalf("len(utils) = %d, want 5", len(utils))
+	}
+
+	// Verify all 5 node names appear in results (order-independent).
+	found := make(map[string]bool)
+	for _, u := range utils {
+		found[u.NodeName] = true
+	}
+	for _, n := range nodes {
+		if !found[n.Name] {
+			t.Errorf("node %q missing from results", n.Name)
+		}
+	}
+}
+
+func TestComputeNodeUtilization_ConcurrentPartialError(t *testing.T) {
+	nodes := []NodeInput{
+		{Name: "node-1", InstanceID: "i-001", InstanceType: "m5.large"},
+		{Name: "node-2", InstanceID: "i-002", InstanceType: "m5.large"},
+		{Name: "node-3", InstanceID: "i-003", InstanceType: "m5.large"},
+	}
+
+	node2Err := errors.New("node-2 ENI query failed")
+
+	mock := &mockEC2API{
+		describeInstanceTypes: m5LargeMock(),
+		describeNetworkInterfaces: func(_ context.Context, params *ec2.DescribeNetworkInterfacesInput, _ ...func(*ec2.Options)) (*ec2.DescribeNetworkInterfacesOutput, error) {
+			instanceID := params.Filters[0].Values[0]
+			if instanceID == "i-002" {
+				return nil, node2Err
+			}
+			devIdx := int32(0)
+			return &ec2.DescribeNetworkInterfacesOutput{
+				NetworkInterfaces: []types.NetworkInterface{
+					{
+						NetworkInterfaceId: ptrStr("eni-001"),
+						Attachment:         &types.NetworkInterfaceAttachment{DeviceIndex: &devIdx},
+						PrivateIpAddresses: make([]types.NetworkInterfacePrivateIpAddress, 2),
+					},
+				},
+			}, nil
+		},
+	}
+
+	utils, skipped, err := ComputeNodeUtilization(context.Background(), mock, nodes, false, 3)
+	if err != nil {
+		t.Fatalf("unexpected terminal error: %v", err)
+	}
+	if len(utils) != 2 {
+		t.Errorf("len(utils) = %d, want 2", len(utils))
+	}
+	if len(skipped) != 1 {
+		t.Fatalf("len(skipped) = %d, want 1", len(skipped))
+	}
+	if skipped[0].NodeName != "node-2" {
+		t.Errorf("skipped[0].NodeName = %q, want node-2", skipped[0].NodeName)
+	}
+}
