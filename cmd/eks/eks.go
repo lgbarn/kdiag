@@ -16,12 +16,12 @@ import (
 )
 
 var (
-	configFlags  *genericclioptions.ConfigFlags
-	outputFormat *string
-	timeout      *time.Duration
-	verbose      *bool
-	awsProfile   string
-	awsRegion    string
+	configFlags   *genericclioptions.ConfigFlags
+	outputFormat  *string
+	timeout       *time.Duration
+	verbose       *bool
+	awsProfilePtr *string
+	awsRegionPtr  *string
 )
 
 // EksCmd is the parent cobra command for EKS-specific diagnostics.
@@ -33,22 +33,24 @@ var EksCmd = &cobra.Command{
 	},
 }
 
-// Init stores the shared flag pointers coming from the root command,
-// registers EKS-specific persistent flags, and attaches EksCmd to root.
+// Init stores the shared flag pointers coming from the root command and
+// attaches EksCmd to root. The --profile and --region flags are registered
+// on the root command so they are available to all subcommands (including diagnose).
 func Init(
 	root *cobra.Command,
 	flags *genericclioptions.ConfigFlags,
 	outFmt *string,
 	tout *time.Duration,
 	verb *bool,
+	profile *string,
+	region *string,
 ) {
 	configFlags = flags
 	outputFormat = outFmt
 	timeout = tout
 	verbose = verb
-
-	EksCmd.PersistentFlags().StringVar(&awsProfile, "profile", "", "AWS shared config profile to use (like terraform -profile)")
-	EksCmd.PersistentFlags().StringVar(&awsRegion, "region", "", "AWS region override (auto-detected from EKS endpoint when omitted)")
+	awsProfilePtr = profile
+	awsRegionPtr = region
 
 	root.AddCommand(EksCmd)
 }
@@ -78,7 +80,12 @@ func isVerbose() bool {
 }
 
 // GetAWSProfile returns the current --profile flag value.
-func GetAWSProfile() string { return awsProfile }
+func GetAWSProfile() string {
+	if awsProfilePtr == nil {
+		return ""
+	}
+	return *awsProfilePtr
+}
 
 // requireEKS returns an error when host is not an EKS cluster endpoint.
 func requireEKS(host string) error {
@@ -91,8 +98,8 @@ func requireEKS(host string) error {
 // resolveRegion returns the AWS region to use: the explicit --region flag
 // value takes precedence, otherwise the region is parsed from the EKS host.
 func resolveRegion(host string) string {
-	if awsRegion != "" {
-		return awsRegion
+	if awsRegionPtr != nil && *awsRegionPtr != "" {
+		return *awsRegionPtr
 	}
 	region, err := awspkg.RegionFromHost(host)
 	if err != nil {
@@ -107,7 +114,7 @@ func resolveRegion(host string) string {
 // newEC2Client resolves the AWS region and constructs a new EC2 API client.
 func newEC2Client(ctx context.Context, host string) (awspkg.EC2API, error) {
 	region := resolveRegion(host)
-	return awspkg.NewEC2Client(ctx, region, awsProfile)
+	return awspkg.NewEC2Client(ctx, region, GetAWSProfile())
 }
 
 // SkippedNode records a node that was excluded from a report with a reason.

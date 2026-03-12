@@ -192,7 +192,7 @@ func runDiagnose(cmd *cobra.Command, args []string) error {
 			fmt.Fprintf(os.Stderr, "[kdiag] could not detect region from host %q: %v; falling back to AWS config\n", host, regionErr)
 		}
 
-		ec2Client, ec2Err := awspkg.NewEC2Client(ctx, region, eks.GetAWSProfile())
+		ec2Client, ec2Err := awspkg.NewEC2Client(ctx, region, GetAWSProfile())
 		if ec2Err != nil {
 			report.Checks = append(report.Checks,
 				DiagnoseCheckResult{Name: "cni", Severity: SeverityError, Summary: "failed to create EC2 client", Error: sanitizeError(ec2Err.Error())},

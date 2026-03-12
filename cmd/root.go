@@ -33,6 +33,12 @@ var (
 
 	// verbose enables debug logging when true.
 	verbose bool
+
+	// awsProfile is the --profile flag: AWS shared config profile to use.
+	awsProfile string
+
+	// awsRegion is the --region flag: AWS region override.
+	awsRegion string
 )
 
 var rootCmd = &cobra.Command{
@@ -56,8 +62,10 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&imagePullSecret, "image-pull-secret", "", "Image pull secret for private registry debug images")
 	rootCmd.PersistentFlags().DurationVar(&timeout, "timeout", 30*time.Second, "Timeout for operations (e.g. 30s, 2m)")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose/debug logging")
+	rootCmd.PersistentFlags().StringVar(&awsProfile, "profile", "", "AWS shared config profile to use")
+	rootCmd.PersistentFlags().StringVar(&awsRegion, "region", "", "AWS region override (auto-detected from EKS endpoint when omitted)")
 
-	eks.Init(rootCmd, ConfigFlags, &outputFormat, &timeout, &verbose)
+	eks.Init(rootCmd, ConfigFlags, &outputFormat, &timeout, &verbose, &awsProfile, &awsRegion)
 }
 
 // Execute runs the root command. Returns any error.
@@ -90,6 +98,12 @@ func GetTimeout() time.Duration { return timeout }
 
 // IsVerbose returns true when --verbose/-v is set.
 func IsVerbose() bool { return verbose }
+
+// GetAWSProfile returns the value of the --profile flag.
+func GetAWSProfile() string { return awsProfile }
+
+// GetAWSRegion returns the value of the --region flag.
+func GetAWSRegion() string { return awsRegion }
 
 // StripPodPrefix removes a "pod/" prefix from an argument so that commands
 // accepting bare pod names also work when called with "pod/my-pod" for
