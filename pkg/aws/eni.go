@@ -3,6 +3,7 @@ package aws
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
@@ -140,14 +141,21 @@ type NodeUtilization struct {
 }
 
 // ComputeNodeUtilization calculates ENI and IP utilization for a set of nodes.
-// It batch-fetches instance type limits, then queries per-node ENI data.
+// It batch-fetches instance type limits, then queries per-node ENI data
+// concurrently using a bounded goroutine pool of size concurrency. If
+// concurrency <= 0 it is treated as 1 (serial execution).
 // Nodes whose ENI queries fail are collected in the returned skipped slice rather
 // than returning a terminal error. GetInstanceTypeLimits failure is terminal.
 // When prefixDelegation is true the effective IP capacity is multiplied by 16.
 // Status thresholds: >=85 → "EXHAUSTED", >=70 → "WARNING", else "OK".
-func ComputeNodeUtilization(ctx context.Context, api EC2API, nodes []NodeInput, prefixDelegation bool) ([]NodeUtilization, []ENISkippedNode, error) {
+// Result order is non-deterministic when concurrency > 1.
+func ComputeNodeUtilization(ctx context.Context, api EC2API, nodes []NodeInput, prefixDelegation bool, concurrency int) ([]NodeUtilization, []ENISkippedNode, error) {
 	if len(nodes) == 0 {
 		return []NodeUtilization{}, []ENISkippedNode{}, nil
+	}
+
+	if concurrency <= 0 {
+		concurrency = 1
 	}
 
 	// Collect unique instance types for a single batch limits call.
@@ -168,52 +176,72 @@ func ComputeNodeUtilization(ctx context.Context, api EC2API, nodes []NodeInput, 
 	utils := make([]NodeUtilization, 0, len(nodes))
 	skipped := make([]ENISkippedNode, 0)
 
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	sem := make(chan struct{}, concurrency)
+
 	for _, node := range nodes {
-		eniInfo, err := ListNodeENIs(ctx, api, node.InstanceID)
-		if err != nil {
-			skipped = append(skipped, ENISkippedNode{
-				NodeName: node.Name,
-				Reason:   err.Error(),
+		node := node // capture loop variable
+		wg.Add(1)
+		go func() {
+			sem <- struct{}{}
+			defer func() {
+				<-sem
+				wg.Done()
+			}()
+
+			eniInfo, err := ListNodeENIs(ctx, api, node.InstanceID)
+			if err != nil {
+				mu.Lock()
+				skipped = append(skipped, ENISkippedNode{
+					NodeName: node.Name,
+					Reason:   err.Error(),
+				})
+				mu.Unlock()
+				return
+			}
+
+			var maxENIs, maxIPsPerENI int32
+			if lim, ok := limits[node.InstanceType]; ok {
+				maxENIs = lim.MaxENIs
+				maxIPsPerENI = lim.MaxIPsPerENI
+			}
+
+			maxTotalIPs := int(maxENIs) * int(maxIPsPerENI)
+			if prefixDelegation {
+				maxTotalIPs *= 16
+			}
+
+			utilizationPct := 0
+			if maxTotalIPs > 0 {
+				utilizationPct = (eniInfo.TotalIPs * 100) / maxTotalIPs
+			}
+
+			status := "OK"
+			switch {
+			case utilizationPct >= 85:
+				status = "EXHAUSTED"
+			case utilizationPct >= 70:
+				status = "WARNING"
+			}
+
+			mu.Lock()
+			utils = append(utils, NodeUtilization{
+				NodeName:       node.Name,
+				InstanceType:   node.InstanceType,
+				MaxENIs:        maxENIs,
+				MaxIPsPerENI:   maxIPsPerENI,
+				CurrentENIs:    len(eniInfo.ENIs),
+				CurrentIPs:     eniInfo.TotalIPs,
+				MaxTotalIPs:    maxTotalIPs,
+				UtilizationPct: utilizationPct,
+				Status:         status,
 			})
-			continue
-		}
-
-		var maxENIs, maxIPsPerENI int32
-		if lim, ok := limits[node.InstanceType]; ok {
-			maxENIs = lim.MaxENIs
-			maxIPsPerENI = lim.MaxIPsPerENI
-		}
-
-		maxTotalIPs := int(maxENIs) * int(maxIPsPerENI)
-		if prefixDelegation {
-			maxTotalIPs *= 16
-		}
-
-		utilizationPct := 0
-		if maxTotalIPs > 0 {
-			utilizationPct = (eniInfo.TotalIPs * 100) / maxTotalIPs
-		}
-
-		status := "OK"
-		switch {
-		case utilizationPct >= 85:
-			status = "EXHAUSTED"
-		case utilizationPct >= 70:
-			status = "WARNING"
-		}
-
-		utils = append(utils, NodeUtilization{
-			NodeName:       node.Name,
-			InstanceType:   node.InstanceType,
-			MaxENIs:        maxENIs,
-			MaxIPsPerENI:   maxIPsPerENI,
-			CurrentENIs:    len(eniInfo.ENIs),
-			CurrentIPs:     eniInfo.TotalIPs,
-			MaxTotalIPs:    maxTotalIPs,
-			UtilizationPct: utilizationPct,
-			Status:         status,
-		})
+			mu.Unlock()
+		}()
 	}
+
+	wg.Wait()
 
 	return utils, skipped, nil
 }
