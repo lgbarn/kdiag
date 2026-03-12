@@ -147,7 +147,7 @@ func runCNI(cmd *cobra.Command, args []string) error {
 		})
 	}
 
-	utils, nodeSkipped, err := awspkg.ComputeNodeUtilization(ctx, ec2Client, nodeInputs, prefixDelegation)
+	utils, nodeSkipped, err := awspkg.ComputeNodeUtilization(ctx, ec2Client, nodeInputs, prefixDelegation, 10)
 	if err != nil {
 		return fmt.Errorf("compute node utilization: %w", err)
 	}

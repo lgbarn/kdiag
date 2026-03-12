@@ -345,7 +345,7 @@ func countExhaustedNodes(ctx context.Context, ec2Client awspkg.EC2API, nodes []c
 		})
 	}
 
-	utils, skipped, err := awspkg.ComputeNodeUtilization(ctx, ec2Client, nodeInputs, false)
+	utils, skipped, err := awspkg.ComputeNodeUtilization(ctx, ec2Client, nodeInputs, false, 10)
 	if err != nil {
 		return 0, fmt.Errorf("compute node utilization: %w", err)
 	}

@@ -254,7 +254,7 @@ func TestComputeNodeUtilization_OK(t *testing.T) {
 		},
 	}
 
-	utils, skipped, err := ComputeNodeUtilization(context.Background(), mock, nodes, false)
+	utils, skipped, err := ComputeNodeUtilization(context.Background(), mock, nodes, false, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -292,7 +292,7 @@ func TestComputeNodeUtilization_Warning(t *testing.T) {
 		describeNetworkInterfaces: fixedIPsMock(21),
 	}
 
-	utils, _, err := ComputeNodeUtilization(context.Background(), mock, nodes, false)
+	utils, _, err := ComputeNodeUtilization(context.Background(), mock, nodes, false, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -314,7 +314,7 @@ func TestComputeNodeUtilization_Exhausted(t *testing.T) {
 		describeNetworkInterfaces: fixedIPsMock(26),
 	}
 
-	utils, _, err := ComputeNodeUtilization(context.Background(), mock, nodes, false)
+	utils, _, err := ComputeNodeUtilization(context.Background(), mock, nodes, false, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -336,7 +336,7 @@ func TestComputeNodeUtilization_PrefixDelegation(t *testing.T) {
 		describeNetworkInterfaces: fixedIPsMock(26),
 	}
 
-	utils, _, err := ComputeNodeUtilization(context.Background(), mock, nodes, true)
+	utils, _, err := ComputeNodeUtilization(context.Background(), mock, nodes, true, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -364,7 +364,7 @@ func TestComputeNodeUtilization_ENIQueryError(t *testing.T) {
 		},
 	}
 
-	utils, skipped, err := ComputeNodeUtilization(context.Background(), mock, nodes, false)
+	utils, skipped, err := ComputeNodeUtilization(context.Background(), mock, nodes, false, 0)
 	if err != nil {
 		t.Fatalf("unexpected terminal error: %v", err)
 	}
@@ -390,7 +390,7 @@ func TestComputeNodeUtilization_LimitsError(t *testing.T) {
 		},
 	}
 
-	utils, _, err := ComputeNodeUtilization(context.Background(), mock, nodes, false)
+	utils, _, err := ComputeNodeUtilization(context.Background(), mock, nodes, false, 0)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -405,7 +405,7 @@ func TestComputeNodeUtilization_LimitsError(t *testing.T) {
 func TestComputeNodeUtilization_EmptyInput(t *testing.T) {
 	mock := &mockEC2API{}
 
-	utils, skipped, err := ComputeNodeUtilization(context.Background(), mock, nil, false)
+	utils, skipped, err := ComputeNodeUtilization(context.Background(), mock, nil, false, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

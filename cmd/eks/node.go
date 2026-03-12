@@ -139,7 +139,7 @@ func runNode(cmd *cobra.Command, args []string) error {
 		})
 	}
 
-	utils, nodeSkipped, err := awspkg.ComputeNodeUtilization(ctx, ec2Client, nodeInputs, false)
+	utils, nodeSkipped, err := awspkg.ComputeNodeUtilization(ctx, ec2Client, nodeInputs, false, 10)
 	if err != nil {
 		return fmt.Errorf("compute node utilization: %w", err)
 	}
