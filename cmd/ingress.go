@@ -246,11 +246,12 @@ func checkControllerHealth(ctx context.Context, client *k8s.Client, controller s
 }
 
 // findIngressesForPod finds Ingresses that route to Services selecting this pod.
-func findIngressesForPod(ctx context.Context, client *k8s.Client, namespace string, pod *corev1.Pod) ([]IngressRuleResult, []IngressTLSResult) {
+// It returns the matched ingress rules, TLS results, and any API error encountered.
+func findIngressesForPod(ctx context.Context, client *k8s.Client, namespace string, pod *corev1.Pod) ([]IngressRuleResult, []IngressTLSResult, error) {
 	// Find services that select this pod.
 	svcList, err := client.Clientset.CoreV1().Services(namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
-		return nil, nil
+		return nil, nil, fmt.Errorf("list services: %w", err)
 	}
 
 	podSvcNames := map[string]bool{}
@@ -271,13 +272,13 @@ func findIngressesForPod(ctx context.Context, client *k8s.Client, namespace stri
 	}
 
 	if len(podSvcNames) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	// Find ingresses referencing those services.
 	ingList, err := client.Clientset.NetworkingV1().Ingresses(namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
-		return nil, nil
+		return nil, nil, fmt.Errorf("list ingresses: %w", err)
 	}
 
 	var rules []IngressRuleResult
@@ -350,7 +351,7 @@ func findIngressesForPod(ctx context.Context, client *k8s.Client, namespace stri
 		}
 	}
 
-	return rules, tlsResults
+	return rules, tlsResults, nil
 }
 
 // printIngressTable writes a human-readable table view of an IngressResult.

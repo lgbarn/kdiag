@@ -39,9 +39,20 @@ func BuildServiceEndpoints(region string) []ServiceEndpoint {
 	}
 }
 
-// ClassifyIP returns "private" for RFC 1918 addresses, "public" otherwise.
+// ClassifyIP returns "private" for RFC 1918, loopback (127.0.0.0/8),
+// link-local (169.254.0.0/16), IPv6 loopback (::1/128), IPv6 ULA (fc00::/7),
+// and IPv6 link-local (fe80::/10) addresses; "public" otherwise.
 func ClassifyIP(ip net.IP) string {
-	for _, cidr := range []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"} {
+	for _, cidr := range []string{
+		"10.0.0.0/8",
+		"172.16.0.0/12",
+		"192.168.0.0/16",
+		"127.0.0.0/8",
+		"169.254.0.0/16",
+		"::1/128",
+		"fc00::/7",
+		"fe80::/10",
+	} {
 		_, network, _ := net.ParseCIDR(cidr)
 		if network.Contains(ip) {
 			return "private"
@@ -73,8 +84,10 @@ func CheckEndpointDNS(ep ServiceEndpoint, resolver DNSResolver) EndpointCheckRes
 	return result
 }
 
-// EnrichWithVpcEndpoints calls DescribeVpcEndpoints and enriches results.
-func EnrichWithVpcEndpoints(ctx context.Context, api EC2API, region string, results []EndpointCheckResult) []EndpointCheckResult {
+// EnrichWithVpcEndpoints calls DescribeVpcEndpoints and enriches results with
+// VPC endpoint metadata. It returns the (possibly unchanged) results slice and
+// any error from the EC2 API call. On error, results are returned unmodified.
+func EnrichWithVpcEndpoints(ctx context.Context, api EC2API, region string, results []EndpointCheckResult) ([]EndpointCheckResult, error) {
 	endpoints := BuildServiceEndpoints(region)
 	svcToIdx := map[string]int{}
 	for i, r := range results {
@@ -90,7 +103,7 @@ func EnrichWithVpcEndpoints(ctx context.Context, api EC2API, region string, resu
 		svcNames = append(svcNames, sn)
 	}
 	if len(svcNames) == 0 {
-		return results
+		return results, nil
 	}
 	out, err := api.DescribeVpcEndpoints(ctx, &ec2.DescribeVpcEndpointsInput{
 		Filters: []ec2types.Filter{
@@ -98,7 +111,7 @@ func EnrichWithVpcEndpoints(ctx context.Context, api EC2API, region string, resu
 		},
 	})
 	if err != nil {
-		return results
+		return results, fmt.Errorf("DescribeVpcEndpoints: %w", err)
 	}
 	for _, vpce := range out.VpcEndpoints {
 		svcName := aws.ToString(vpce.ServiceName)
@@ -110,5 +123,5 @@ func EnrichWithVpcEndpoints(ctx context.Context, api EC2API, region string, resu
 		results[idx].EndpointType = string(vpce.VpcEndpointType)
 		results[idx].State = string(vpce.State)
 	}
-	return results
+	return results, nil
 }

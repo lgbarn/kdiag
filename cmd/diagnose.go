@@ -169,11 +169,19 @@ func runDiagnose(cmd *cobra.Command, args []string) error {
 
 	// Ingress check: find Ingresses routing to this pod's Services.
 	if pod != nil {
-		ingRules, ingTLS := findIngressesForPod(ctx, client, namespace, pod)
-		sev, sum := ingressSeverity(ingRules, ingTLS)
-		report.Checks = append(report.Checks, DiagnoseCheckResult{
-			Name: "ingress", Severity: sev, Summary: sum,
-		})
+		ingRules, ingTLS, ingErr := findIngressesForPod(ctx, client, namespace, pod)
+		if ingErr != nil {
+			fmt.Fprintf(os.Stderr, "[kdiag] warning: ingress check failed: %v\n", ingErr)
+			report.Checks = append(report.Checks, DiagnoseCheckResult{
+				Name: "ingress", Severity: SeverityWarn,
+				Summary: fmt.Sprintf("ingress API error: %v", sanitizeError(ingErr.Error())),
+			})
+		} else {
+			sev, sum := ingressSeverity(ingRules, ingTLS)
+			report.Checks = append(report.Checks, DiagnoseCheckResult{
+				Name: "ingress", Severity: sev, Summary: sum,
+			})
+		}
 	}
 
 	// EKS-specific checks.

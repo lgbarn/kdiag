@@ -73,8 +73,13 @@ func runEndpoint(cmd *cobra.Command, args []string) error {
 	apiEnriched := false
 	ec2Client, ec2Err := newEC2Client(ctx, k8sClient.Config.Host)
 	if ec2Err == nil {
-		results = awspkg.EnrichWithVpcEndpoints(ctx, ec2Client, region, results)
-		apiEnriched = true
+		var enrichErr error
+		results, enrichErr = awspkg.EnrichWithVpcEndpoints(ctx, ec2Client, region, results)
+		if enrichErr != nil {
+			fmt.Fprintf(os.Stderr, "[kdiag] warning: VPC endpoint enrichment failed: %v\n", enrichErr)
+		} else {
+			apiEnriched = true
+		}
 	}
 
 	// 7. Build report and output.
