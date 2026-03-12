@@ -91,8 +91,14 @@ func init() {
 }
 
 func runNode(cmd *cobra.Command, args []string) error {
-	if statusFilter != "" && !showPods {
-		return fmt.Errorf("--status requires --show-pods")
+	if statusFilter != "" {
+		if !showPods {
+			return fmt.Errorf("--status requires --show-pods")
+		}
+		upper := strings.ToUpper(statusFilter)
+		if upper != "EXHAUSTED" && upper != "WARNING" && upper != "OK" {
+			return fmt.Errorf("--status must be one of: EXHAUSTED, WARNING, OK (got %q)", statusFilter)
+		}
 	}
 
 	// 1. Build Kubernetes client and verify EKS.
@@ -143,7 +149,7 @@ func runNode(cmd *cobra.Command, args []string) error {
 		})
 	}
 
-	utils, nodeSkipped, err := awspkg.ComputeNodeUtilization(ctx, ec2Client, nodeInputs, false, 10)
+	utils, nodeSkipped, err := awspkg.ComputeNodeUtilization(ctx, ec2Client, nodeInputs, false, awspkg.DefaultConcurrency)
 	if err != nil {
 		return fmt.Errorf("compute node utilization: %w", err)
 	}
@@ -264,6 +270,8 @@ func runNode(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// ExhaustedNodes is counted pre-filter; warningCount is counted post-filter
+	// so the trailing summary reflects the filtered view when --status is set.
 	atRisk := report.Summary.ExhaustedNodes
 	warningCount := 0
 	for _, n := range report.Nodes {

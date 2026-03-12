@@ -176,15 +176,6 @@ func ClassifyNodes(nodes []corev1.Node) (eligible []EligibleNode, skipped []Skip
 	return
 }
 
-// uniqueKeys returns a slice of all keys from a map[string]struct{}.
-func uniqueKeys(m map[string]struct{}) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	return keys
-}
-
 // printSkippedNodes renders a skipped-nodes table to stdout.
 func printSkippedNodes(skipped []SkippedNode) error {
 	if len(skipped) == 0 {

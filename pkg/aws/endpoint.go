@@ -53,7 +53,10 @@ func ClassifyIP(ip net.IP) string {
 		"fc00::/7",
 		"fe80::/10",
 	} {
-		_, network, _ := net.ParseCIDR(cidr)
+		_, network, err := net.ParseCIDR(cidr)
+		if err != nil {
+			continue
+		}
 		if network.Contains(ip) {
 			return "private"
 		}

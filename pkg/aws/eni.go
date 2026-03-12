@@ -114,6 +114,9 @@ func GetInstanceTypeLimits(ctx context.Context, api EC2API, instanceTypes []stri
 	return result, nil
 }
 
+// DefaultConcurrency is the default number of concurrent ENI queries.
+const DefaultConcurrency = 10
+
 // NodeInput describes a Kubernetes node to evaluate for ENI/IP utilization.
 type NodeInput struct {
 	Name         string
@@ -180,11 +183,14 @@ func ComputeNodeUtilization(ctx context.Context, api EC2API, nodes []NodeInput, 
 	var mu sync.Mutex
 	sem := make(chan struct{}, concurrency)
 
+	// limits is read-only from this point — safe for concurrent goroutine access.
 	for _, node := range nodes {
-		node := node // capture loop variable
+		// Acquire semaphore before spawning to bound goroutine count, not just active work.
+		// Context cancellation drains indirectly: running goroutines' AWS API calls are
+		// context-aware and return quickly on cancel, freeing semaphore slots.
+		sem <- struct{}{}
 		wg.Add(1)
 		go func() {
-			sem <- struct{}{}
 			defer func() {
 				<-sem
 				wg.Done()

@@ -147,7 +147,7 @@ func runCNI(cmd *cobra.Command, args []string) error {
 		})
 	}
 
-	utils, nodeSkipped, err := awspkg.ComputeNodeUtilization(ctx, ec2Client, nodeInputs, prefixDelegation, 10)
+	utils, nodeSkipped, err := awspkg.ComputeNodeUtilization(ctx, ec2Client, nodeInputs, prefixDelegation, awspkg.DefaultConcurrency)
 	if err != nil {
 		return fmt.Errorf("compute node utilization: %w", err)
 	}
@@ -164,6 +164,9 @@ func runCNI(cmd *cobra.Command, args []string) error {
 	}
 
 	for _, u := range utils {
+		// CNI uses a binary exhausted flag (>=85%) — the WARNING tier from
+		// ComputeNodeUtilization is intentionally not surfaced here because
+		// the CNI report focuses on prefix delegation capacity, not general utilization.
 		exhausted := u.Status == "EXHAUSTED"
 		if exhausted {
 			ipExhausted = append(ipExhausted, u.NodeName)

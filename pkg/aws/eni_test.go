@@ -417,6 +417,29 @@ func TestComputeNodeUtilization_EmptyInput(t *testing.T) {
 	}
 }
 
+func TestComputeNodeUtilization_ConcurrencyOne(t *testing.T) {
+	nodes := []NodeInput{
+		{Name: "node-1", InstanceID: "i-001", InstanceType: "m5.large"},
+		{Name: "node-2", InstanceID: "i-002", InstanceType: "m5.large"},
+	}
+
+	mock := &mockEC2API{
+		describeInstanceTypes:     m5LargeMock(),
+		describeNetworkInterfaces: fixedIPsMock(5),
+	}
+
+	utils, skipped, err := ComputeNodeUtilization(context.Background(), mock, nodes, false, 1)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(skipped) != 0 {
+		t.Errorf("len(skipped) = %d, want 0", len(skipped))
+	}
+	if len(utils) != 2 {
+		t.Fatalf("len(utils) = %d, want 2", len(utils))
+	}
+}
+
 func TestComputeNodeUtilization_ConcurrentMultiNode(t *testing.T) {
 	nodes := []NodeInput{
 		{Name: "node-1", InstanceID: "i-001", InstanceType: "m5.large"},
@@ -427,19 +450,8 @@ func TestComputeNodeUtilization_ConcurrentMultiNode(t *testing.T) {
 	}
 
 	mock := &mockEC2API{
-		describeInstanceTypes: m5LargeMock(),
-		describeNetworkInterfaces: func(_ context.Context, _ *ec2.DescribeNetworkInterfacesInput, _ ...func(*ec2.Options)) (*ec2.DescribeNetworkInterfacesOutput, error) {
-			devIdx := int32(0)
-			return &ec2.DescribeNetworkInterfacesOutput{
-				NetworkInterfaces: []types.NetworkInterface{
-					{
-						NetworkInterfaceId: ptrStr("eni-001"),
-						Attachment:         &types.NetworkInterfaceAttachment{DeviceIndex: &devIdx},
-						PrivateIpAddresses: make([]types.NetworkInterfacePrivateIpAddress, 2),
-					},
-				},
-			}, nil
-		},
+		describeInstanceTypes:     m5LargeMock(),
+		describeNetworkInterfaces: fixedIPsMock(2),
 	}
 
 	utils, skipped, err := ComputeNodeUtilization(context.Background(), mock, nodes, false, 3)

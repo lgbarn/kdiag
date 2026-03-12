@@ -171,7 +171,7 @@ func runDiagnose(cmd *cobra.Command, args []string) error {
 	if pod != nil {
 		ingRules, ingTLS, ingErr := findIngressesForPod(ctx, client, namespace, pod)
 		if ingErr != nil {
-			fmt.Fprintf(os.Stderr, "[kdiag] warning: ingress check failed: %v\n", ingErr)
+			fmt.Fprintf(os.Stderr, "[kdiag] warning: ingress check failed: %v\n", sanitizeError(ingErr.Error()))
 			report.Checks = append(report.Checks, DiagnoseCheckResult{
 				Name: "ingress", Severity: SeverityWarn,
 				Summary: fmt.Sprintf("ingress API error: %v", sanitizeError(ingErr.Error())),
@@ -345,7 +345,7 @@ func countExhaustedNodes(ctx context.Context, ec2Client awspkg.EC2API, nodes []c
 		})
 	}
 
-	utils, skipped, err := awspkg.ComputeNodeUtilization(ctx, ec2Client, nodeInputs, false, 10)
+	utils, skipped, err := awspkg.ComputeNodeUtilization(ctx, ec2Client, nodeInputs, false, awspkg.DefaultConcurrency)
 	if err != nil {
 		return 0, fmt.Errorf("compute node utilization: %w", err)
 	}

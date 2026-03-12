@@ -120,10 +120,9 @@ func runPodShell(cmd *cobra.Command, args []string) error {
 	})
 	if err != nil {
 		if errors.IsForbidden(err) {
-			rbacMsg := k8s.FormatRBACError(checks)
-			if rbacMsg != "" {
-				return fmt.Errorf("forbidden creating ephemeral container\n\n%s", rbacMsg)
-			}
+			// The pre-flight RBAC check (line 97) already returned early if permissions
+			// were missing, so reaching here means RBAC was granted at pre-flight time
+			// but revoked or overridden by the time the API call executed.
 			return fmt.Errorf("error: forbidden creating ephemeral container in pod %q — check your RBAC permissions", podName)
 		}
 		return fmt.Errorf("error creating ephemeral container: %w", err)
