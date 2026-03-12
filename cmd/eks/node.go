@@ -272,7 +272,9 @@ func runNode(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	_, _ = os.Stdout.WriteString(outgoingString(report.Summary.CheckedNodes, report.Summary.SkippedNodes, atRisk+warningCount))
+	if _, err := os.Stdout.WriteString(outgoingString(report.Summary.CheckedNodes, report.Summary.SkippedNodes, atRisk+warningCount)); err != nil {
+		return err
+	}
 	return nil
 }
 
