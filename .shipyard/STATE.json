@@ -1,7 +1,7 @@
 {
-  "current_phase": 6,
-  "position": "Phase 6 build complete",
-  "status": "complete",
+  "current_phase": 7,
+  "position": "Phase 7 planned, ready for build",
+  "status": "planned",
   "phases": {
     "1": { "status": "complete" },
     "2": { "status": "complete" },
@@ -9,6 +9,6 @@
     "4": { "status": "complete" },
     "5": { "status": "complete_with_gaps" },
     "6": { "status": "complete" },
-    "7": { "status": "ready" }
+    "7": { "status": "planned" }
   }
 }
