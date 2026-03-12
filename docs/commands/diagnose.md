@@ -15,12 +15,16 @@ The `diagnose` command runs a battery of checks against a target pod and produce
 | Check | What it does |
 |-------|-------------|
 | **inspect** | Pod phase, container states, restart counts |
+| **refs** | Verifies all ConfigMap and Secret references in the pod spec exist in the namespace |
 | **dns** | CoreDNS pod health (ready/not-ready count) |
 | **netpol** | NetworkPolicies selecting the pod |
+| **ingress** | Ingress rules and TLS configuration routing to Services that select the pod |
 | **cni** | AWS VPC CNI DaemonSet health and IP exhaustion (EKS only) |
 | **sg** | Security groups attached to the pod's ENI (EKS only) |
 
 On non-EKS clusters, the `cni` and `sg` checks are skipped automatically.
+
+If the Kubernetes API is unavailable or returns an error during the `ingress` check, the check is recorded with `warn` severity and the error is shown in the summary rather than aborting the full diagnostic run. The warning is also printed to stderr.
 
 ## Severity Levels
 
@@ -59,12 +63,14 @@ kdiag diagnose my-pod -v
   "is_eks": true,
   "checks": [
     {"name": "inspect", "severity": "pass", "summary": "all 2 container(s) running normally"},
+    {"name": "refs", "severity": "pass", "summary": "all 3 configmap/secret ref(s) found"},
     {"name": "dns", "severity": "pass", "summary": "2/2 CoreDNS pod(s) ready"},
     {"name": "netpol", "severity": "pass", "summary": "3 NetworkPolicy/ies matched"},
+    {"name": "ingress", "severity": "pass", "summary": "1 ingress rule(s) found"},
     {"name": "cni", "severity": "pass", "summary": "DaemonSet healthy; 0 node(s) with exhausted IPs"},
     {"name": "sg", "severity": "pass", "summary": "4 security groups retrieved"}
   ],
-  "summary": {"total": 5, "pass": 5, "warn": 0, "fail": 0, "error": 0, "skipped": 0}
+  "summary": {"total": 7, "pass": 7, "warn": 0, "fail": 0, "error": 0, "skipped": 0}
 }
 ```
 

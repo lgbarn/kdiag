@@ -229,10 +229,11 @@ Low-level EC2 API wrappers and EKS cluster detection utilities. No Kubernetes cl
 
 ```go
 type EC2API interface {
-    DescribeInstances(...)       (*ec2.DescribeInstancesOutput, error)
-    DescribeInstanceTypes(...)   (*ec2.DescribeInstanceTypesOutput, error)
-    DescribeNetworkInterfaces(...) (*ec2.DescribeNetworkInterfacesOutput, error)
-    DescribeSecurityGroups(...)  (*ec2.DescribeSecurityGroupsOutput, error)
+    DescribeInstances(...)          (*ec2.DescribeInstancesOutput, error)
+    DescribeInstanceTypes(...)      (*ec2.DescribeInstanceTypesOutput, error)
+    DescribeNetworkInterfaces(...)  (*ec2.DescribeNetworkInterfacesOutput, error)
+    DescribeSecurityGroups(...)     (*ec2.DescribeSecurityGroupsOutput, error)
+    DescribeVpcEndpoints(...)       (*ec2.DescribeVpcEndpointsOutput, error)
 }
 ```
 
@@ -256,6 +257,16 @@ A credential pre-flight check (`cfg.Credentials.Retrieve`) runs before returning
 
 **`GetInstanceTypeLimits(ctx, api, instanceTypes []string) (map[string]*InstanceLimits, error)`** — batch-queries ENI and IP-per-ENI limits for a list of instance types via `DescribeInstanceTypes`. The caller collects unique instance types from all nodes and makes a single API call.
 
+**`ComputeNodeUtilization(ctx, api, nodes []NodeInput, prefixDelegation bool, concurrency int) ([]NodeUtilization, []ENISkippedNode, error)`** — shared function used by `eks node`, `eks cni`, and `diagnose`. It batch-fetches instance type limits once (terminal error if this fails), then queries ENIs per node. Per-node ENI query failures are non-terminal: the node is added to the returned `[]ENISkippedNode` slice and processing continues. When `prefixDelegation` is true, the effective IP capacity is multiplied by 16 before computing utilization. Status thresholds: `>= 85%` → `EXHAUSTED`, `>= 70%` → `WARNING`, else `OK`. Per-node ENI queries run concurrently using a bounded goroutine pool of size `concurrency` (callers pass 10). Result order is non-deterministic when `concurrency > 1`; values <= 0 fall back to serial execution.
+
+Supporting types:
+
+| Type | Purpose |
+|------|---------|
+| `NodeInput` | Input descriptor: `Name`, `InstanceID`, `InstanceType` |
+| `ENISkippedNode` | Records a node that could not be evaluated: `NodeName`, `Reason` |
+| `NodeUtilization` | Full utilization snapshot for one node (JSON snake_case tags): limits, current counts, `UtilizationPct`, `Status` |
+
 ### sg.go
 
 **`GetSecurityGroupDetails(ctx, api, groupIDs []string) ([]SecurityGroupDetail, error)`** — fetches full inbound and outbound rules for the given security group IDs. Maps EC2 `IpPermission` types to the kdiag `SGRule` domain type, converting protocol `-1` to `"all"`.
@@ -265,6 +276,16 @@ A credential pre-flight check (`cfg.Credentials.Retrieve`) runs before returning
 **`GetNodePrimaryENISecurityGroups(ctx, api, instanceID string) ([]string, error)`** — returns security group IDs for the primary ENI (device index 0) of an EC2 instance.
 
 **`ParsePodENIAnnotation(annotation string) ([]PodENIAnnotation, error)`** — unmarshals the JSON value of the `vpc.amazonaws.com/pod-eni` annotation used by the VPC CNI Security Groups for Pods feature.
+
+### endpoint.go
+
+**`ClassifyIP(ip net.IP) string`** — returns `"private"` for RFC 1918, loopback (`127.0.0.0/8`), link-local (`169.254.0.0/16`, which includes the EC2 instance metadata endpoint), IPv6 loopback (`::1/128`), IPv6 ULA (`fc00::/7`), and IPv6 link-local (`fe80::/10`) addresses; `"public"` for all others.
+
+**`BuildServiceEndpoints(region string) []ServiceEndpoint`** — returns the set of AWS service endpoints (S3, ECR, STS, etc.) for the given region.
+
+**`CheckEndpointDNS(ep ServiceEndpoint, resolver DNSResolver) EndpointCheckResult`** — resolves the service endpoint's DNS name and classifies each returned IP as `"private"` or `"public"` using `ClassifyIP`. Used by `kdiag eks endpoint` to detect which services are routing over the public internet.
+
+**`EnrichWithVpcEndpoints(ctx, api EC2API, region string, results []EndpointCheckResult) ([]EndpointCheckResult, error)`** — calls `DescribeVpcEndpoints` and annotates each result with the VPC endpoint type and state when a matching endpoint exists. Returns the (possibly unchanged) results slice and any EC2 API error. On error, the caller receives the original results unmodified and can decide whether to surface the error or continue with DNS-only classification.
 
 ## pkg/dns — DNS Package
 
@@ -473,13 +494,12 @@ cmd/eks/cni.go
   ├─ newEC2Client(ctx, host)       ← resolveRegion(host) → pkg/aws.NewEC2Client
   │
   ├─ CoreV1.Nodes().List()
-  │    └─ classify: skip Fargate, extract instanceType + instanceID per node
+  │    └─ ClassifyNodes(): skip Fargate, extract instanceType + instanceID per node
   │
-  ├─ aws.GetInstanceTypeLimits(uniqueTypes)   ← DescribeInstanceTypes (batched)
-  │
-  └─ per node: aws.ListNodeENIs(instanceID)   ← DescribeNetworkInterfaces
-       └─ calculate utilization; flag EXHAUSTED at >= 85%
-       └─ print CNIReport as table (3 sections) or JSON
+  └─ aws.ComputeNodeUtilization(ctx, ec2Client, nodeInputs, prefixDelegation, 10)
+       ├─ DescribeInstanceTypes (batched, unique types only)
+       ├─ DescribeNetworkInterfaces per node, up to 10 concurrent (per-node errors → skipped list)
+       └─ flag EXHAUSTED at >= 85%; print CNIReport as table (3 sections) or JSON
 ```
 
 ### kdiag eks sg \<pod\>
@@ -524,13 +544,13 @@ cmd/eks/node.go
   │         AutoMode → eligible with note
   │         Managed  → eligible
   │
-  ├─ aws.GetInstanceTypeLimits(uniqueTypes)   ← DescribeInstanceTypes (batched)
-  │
-  └─ per node: aws.ListNodeENIs(instanceID)   ← DescribeNetworkInterfaces
+  └─ aws.ComputeNodeUtilization(ctx, ec2Client, nodeInputs, false, 10)
+       ├─ DescribeInstanceTypes (batched, unique types only)
+       ├─ DescribeNetworkInterfaces per node, up to 10 concurrent (per-node errors → skipped list)
        └─ calculate utilization
-       │    < 70% → OK
-       │    70-84% → WARNING
-       │    >= 85% → EXHAUSTED
+            < 70% → OK
+            70-84% → WARNING
+            >= 85% → EXHAUSTED
        └─ print NodeReport as table or JSON
 ```
 

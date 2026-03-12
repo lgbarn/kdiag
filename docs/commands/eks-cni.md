@@ -51,10 +51,16 @@ kdiag eks cni -o json
 kdiag eks cni --region us-west-2
 ```
 
-**Show verbose output including skipped-node warnings:**
+**Show verbose output including skipped-node reasons:**
 
 ```bash
 kdiag eks cni -v
+```
+
+When `--verbose` is set, any node skipped during ENI querying prints a warning to stderr:
+
+```
+[kdiag] warning: skipped node ip-10-0-1-55.us-east-1.compute.internal: <reason>
 ```
 
 ## Output

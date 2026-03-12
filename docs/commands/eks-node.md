@@ -39,6 +39,8 @@ Unlike `kdiag eks cni`, this command does not read the aws-node DaemonSet or app
 
 | Flag | Default | Description |
 |------|---------|-------------|
+| `--show-pods` | `false` | List pods on each node with a daemonset/workload breakdown |
+| `--status` | — | Filter output to nodes matching this status: `EXHAUSTED`, `WARNING`, or `OK`. Requires `--show-pods`. |
 | `--profile` | — | AWS shared config profile to use |
 | `--region` | auto-detected | AWS region (parsed from the EKS API server endpoint when omitted) |
 
@@ -50,6 +52,24 @@ All [global flags](../README.md#global-flags) also apply (`--output`, `--timeout
 
 ```bash
 kdiag eks node
+```
+
+**Show pods on each node with workload breakdown:**
+
+```bash
+kdiag eks node --show-pods
+```
+
+**Show only exhausted nodes with their pods:**
+
+```bash
+kdiag eks node --show-pods --status EXHAUSTED
+```
+
+**Filter to WARNING nodes for capacity planning before pressure hits:**
+
+```bash
+kdiag eks node --show-pods --status WARNING
 ```
 
 **Get JSON output for monitoring integration:**
@@ -64,10 +84,16 @@ kdiag eks node -o json
 kdiag eks node --profile prod --region us-east-1
 ```
 
-**Show verbose output including per-node warnings:**
+**Show verbose output including per-node skip reasons:**
 
 ```bash
 kdiag eks node -v
+```
+
+When `--verbose` is set, any node that could not be evaluated prints a warning to stderr:
+
+```
+[kdiag] warning: skipped node ip-10-0-1-55.us-east-1.compute.internal: <reason>
 ```
 
 ## Output

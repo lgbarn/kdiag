@@ -19,6 +19,7 @@ A Kubernetes diagnostic CLI for EKS clusters. Drop into a debug shell, capture p
 | `kdiag eks cni` | VPC CNI health: aws-node DaemonSet status, CNI configuration, and per-node IP capacity |
 | `kdiag eks sg <pod>` | Effective security groups for a pod (branch ENI for SGP pods, node primary ENI otherwise) |
 | `kdiag eks node` | Per-node ENI and IP capacity: instance type limits vs current allocation, with WARNING/EXHAUSTED thresholds |
+| `kdiag eks endpoint` | Check whether AWS services (STS, ECR, S3, etc.) route over private VPC endpoints or the public internet |
 
 ## Prerequisites
 
@@ -259,3 +260,4 @@ kdiag detects whether a pod is running on Fargate by checking the `eks.amazonaws
 - [eks cni](commands/eks-cni.md) — VPC CNI health and per-node IP capacity
 - [eks sg](commands/eks-sg.md) — effective security groups for a pod
 - [eks node](commands/eks-node.md) — per-node ENI and IP capacity with WARNING/EXHAUSTED thresholds
+- [eks endpoint](commands/eks-endpoint.md) — VPC endpoint check for AWS services
