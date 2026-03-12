@@ -2,6 +2,13 @@
 
 All notable changes to kdiag are documented in this file.
 
+## [0.5.0] - 2026-03-12
+
+### Added
+- Windows cross-compilation support (amd64 and arm64)
+- Windows builds in CI pipeline and goreleaser releases (.zip format)
+- Platform-specific terminal resize handling (SIGWINCH on Unix, no-op on Windows)
+
 ## [0.4.0] - 2026-03-11
 
 ### Added

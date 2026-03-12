@@ -157,8 +157,28 @@ Move-Item kdiag.exe C:\Windows\System32\
 
 ### Build from source
 
+Requires Go 1.23+.
+
 ```sh
 go install github.com/lgbarn/kdiag@latest
+```
+
+Or clone and build manually:
+
+```sh
+git clone https://github.com/lgbarn/kdiag.git
+cd kdiag
+go build -o kdiag .
+```
+
+Cross-compile for another platform:
+
+```sh
+# Windows
+CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -o kdiag.exe .
+
+# Linux from macOS
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o kdiag .
 ```
 
 ### kubectl plugin
