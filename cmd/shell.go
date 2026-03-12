@@ -120,12 +120,9 @@ func runPodShell(cmd *cobra.Command, args []string) error {
 	})
 	if err != nil {
 		if errors.IsForbidden(err) {
-			checks2, rbacCheckErr := k8s.CheckEphemeralContainerRBAC(ctx, client.Clientset, namespace)
-			if rbacCheckErr == nil {
-				rbacMsg := k8s.FormatRBACError(checks2)
-				if rbacMsg != "" {
-					return fmt.Errorf("forbidden creating ephemeral container\n\n%s", rbacMsg)
-				}
+			rbacMsg := k8s.FormatRBACError(checks)
+			if rbacMsg != "" {
+				return fmt.Errorf("forbidden creating ephemeral container\n\n%s", rbacMsg)
 			}
 			return fmt.Errorf("error: forbidden creating ephemeral container in pod %q — check your RBAC permissions", podName)
 		}
