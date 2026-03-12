@@ -148,6 +148,11 @@ sudo mv kdiag /usr/local/bin/
 # Linux arm64
 curl -L https://github.com/lgbarn/kdiag/releases/download/v${VERSION}/kdiag_${VERSION}_linux_arm64.tar.gz | tar xz
 sudo mv kdiag /usr/local/bin/
+
+# Windows amd64 (PowerShell)
+Invoke-WebRequest -Uri "https://github.com/lgbarn/kdiag/releases/download/v${VERSION}/kdiag_${VERSION}_windows_amd64.zip" -OutFile kdiag.zip
+Expand-Archive kdiag.zip -DestinationPath .
+Move-Item kdiag.exe C:\Windows\System32\
 ```
 
 ### Build from source
@@ -171,6 +176,7 @@ kdiag uses your standard kubeconfig, so it works wherever `kubectl` works:
 - **Docker Desktop** Kubernetes
 - **kind** and **k3d** local clusters
 - **Amazon EKS** (with bonus EKS-specific commands)
+- **Windows** with WSL or native (terminal resize detection not supported natively)
 - **GKE**, **AKS**, and any conformant cluster
 
 EKS commands (`eks cni`, `eks sg`, `eks node`) require AWS credentials and are automatically skipped on non-EKS clusters.
