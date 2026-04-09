@@ -127,9 +127,10 @@ func runConnectivity(cmd *cobra.Command, args []string) error {
 				return fmt.Errorf("error: service %q has no ports; use --port to specify", dst)
 			}
 
-			// Auto-detect protocol from service port info.
+			// Auto-detect protocol from service port info, but only when
+			// the user did not explicitly set --protocol.
 			protocol = connectivityProtocol
-			if len(svc.Spec.Ports) > 0 {
+			if !cmd.Flags().Changed("protocol") && len(svc.Spec.Ports) > 0 {
 				portNum := int(svc.Spec.Ports[0].Port)
 				portName := strings.ToLower(svc.Spec.Ports[0].Name)
 				if strings.Contains(portName, "http") || portNum == 80 || portNum == 443 {

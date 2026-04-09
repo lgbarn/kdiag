@@ -232,7 +232,10 @@ func runHealth(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("error connecting to cluster: %w", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), GetTimeout())
+	// Use 3x the base timeout for health: 6 sequential cluster-wide API calls
+	// can exhaust the default 30s budget on large clusters.
+	healthTimeout := 3 * GetTimeout()
+	ctx, cancel := context.WithTimeout(context.Background(), healthTimeout)
 	defer cancel()
 
 	// --- Fetch all cluster-wide data ---

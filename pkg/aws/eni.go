@@ -75,40 +75,65 @@ func ListNodeENIs(ctx context.Context, api EC2API, instanceID string) (*NodeENII
 	return info, nil
 }
 
+// describeInstanceTypesMaxBatch is the maximum number of instance types the
+// DescribeInstanceTypes API accepts per call.
+const describeInstanceTypesMaxBatch = 100
+
 // GetInstanceTypeLimits returns the ENI and IP-per-ENI limits for the given
-// EC2 instance types.
+// EC2 instance types. Input is deduplicated and requests are batched to stay
+// within the API limit of 100 instance types per call.
 func GetInstanceTypeLimits(ctx context.Context, api EC2API, instanceTypes []string) (map[string]*InstanceLimits, error) {
 	result := make(map[string]*InstanceLimits)
 	if len(instanceTypes) == 0 {
 		return result, nil
 	}
 
-	itypes := make([]ec2types.InstanceType, 0, len(instanceTypes))
+	// Deduplicate input to avoid redundant API calls.
+	seen := make(map[string]struct{}, len(instanceTypes))
+	unique := make([]string, 0, len(instanceTypes))
 	for _, it := range instanceTypes {
-		itypes = append(itypes, ec2types.InstanceType(it))
+		if _, ok := seen[it]; !ok {
+			seen[it] = struct{}{}
+			unique = append(unique, it)
+		}
 	}
+	instanceTypes = unique
 
-	out, err := api.DescribeInstanceTypes(ctx, &ec2.DescribeInstanceTypesInput{
-		InstanceTypes: itypes,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("DescribeInstanceTypes: %w", err)
-	}
+	// Process in batches of describeInstanceTypesMaxBatch.
+	for start := 0; start < len(instanceTypes); start += describeInstanceTypesMaxBatch {
+		end := start + describeInstanceTypesMaxBatch
+		if end > len(instanceTypes) {
+			end = len(instanceTypes)
+		}
+		batch := instanceTypes[start:end]
 
-	for _, info := range out.InstanceTypes {
-		if info.NetworkInfo == nil {
-			continue
+		itypes := make([]ec2types.InstanceType, 0, len(batch))
+		for _, it := range batch {
+			itypes = append(itypes, ec2types.InstanceType(it))
 		}
-		limits := &InstanceLimits{
-			InstanceType: string(info.InstanceType),
+
+		out, err := api.DescribeInstanceTypes(ctx, &ec2.DescribeInstanceTypesInput{
+			InstanceTypes: itypes,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("DescribeInstanceTypes: %w", err)
 		}
-		if info.NetworkInfo.MaximumNetworkInterfaces != nil {
-			limits.MaxENIs = *info.NetworkInfo.MaximumNetworkInterfaces
+
+		for _, info := range out.InstanceTypes {
+			if info.NetworkInfo == nil {
+				continue
+			}
+			limits := &InstanceLimits{
+				InstanceType: string(info.InstanceType),
+			}
+			if info.NetworkInfo.MaximumNetworkInterfaces != nil {
+				limits.MaxENIs = *info.NetworkInfo.MaximumNetworkInterfaces
+			}
+			if info.NetworkInfo.Ipv4AddressesPerInterface != nil {
+				limits.MaxIPsPerENI = *info.NetworkInfo.Ipv4AddressesPerInterface
+			}
+			result[string(info.InstanceType)] = limits
 		}
-		if info.NetworkInfo.Ipv4AddressesPerInterface != nil {
-			limits.MaxIPsPerENI = *info.NetworkInfo.Ipv4AddressesPerInterface
-		}
-		result[string(info.InstanceType)] = limits
 	}
 
 	return result, nil

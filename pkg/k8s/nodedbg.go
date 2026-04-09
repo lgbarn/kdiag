@@ -28,15 +28,21 @@ type NodeDebugOpts struct {
 // specified node, with host PID/network/IPC namespaces and the host filesystem
 // mounted at /host. Returns the generated pod name.
 func CreateNodeDebugPod(ctx context.Context, client *Client, opts NodeDebugOpts) (string, error) {
-	raw := fmt.Sprintf("kdiag-node-%s-%s", opts.NodeName, utilrand.String(5))
-	podName := raw
-	if len(podName) > 63 {
-		podName = podName[:63]
+	suffix := utilrand.String(5)
+	prefix := "kdiag-node-"
+	// Truncate the node name so the full pod name (prefix + nodeName + "-" + suffix)
+	// fits within the 63-character Kubernetes name limit while always preserving the
+	// random suffix for uniqueness.
+	maxNodeLen := 63 - len(prefix) - 1 - len(suffix) // 1 for the dash before suffix
+	nodePart := opts.NodeName
+	if len(nodePart) > maxNodeLen {
+		nodePart = nodePart[:maxNodeLen]
 	}
+	podName := fmt.Sprintf("%s%s-%s", prefix, nodePart, suffix)
 
 	hostPathType := corev1.HostPathDirectory
 
-	activeDeadline := int64(3600) // auto-terminate after 1 hour if cleanup misses
+	activeDeadline := int64(7200) // auto-terminate after 2 hours if cleanup misses
 
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{

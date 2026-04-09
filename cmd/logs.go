@@ -44,7 +44,7 @@ type logLine struct {
 // every log line, applies optional string filtering, and serialises concurrent
 // writes with a mutex. In JSON mode it emits JSON-L records instead.
 type prefixWriter struct {
-	mu       sync.Mutex
+	mu       *sync.Mutex
 	base     io.Writer
 	prefix   string
 	filter   string
@@ -199,17 +199,23 @@ func runLogs(cmd *cobra.Command, args []string) error {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
-		<-sigCh
-		cancel()
+		select {
+		case <-sigCh:
+			cancel()
+		case <-ctx.Done():
+		}
+		signal.Stop(sigCh)
 	}()
 
 	var wg sync.WaitGroup
+	var outputMu sync.Mutex
 	for i, pod := range pods {
 		wg.Add(1)
 
 		c := podColors[i%len(podColors)]
 		prefix := c.Sprintf("[%s] ", pod.Name)
 		pw := &prefixWriter{
+			mu:       &outputMu,
 			base:     color.Output,
 			prefix:   prefix,
 			filter:   filterStr,
@@ -232,6 +238,6 @@ func runLogs(cmd *cobra.Command, args []string) error {
 	}
 
 	wg.Wait()
-	signal.Stop(sigCh)
+	cancel()
 	return nil
 }

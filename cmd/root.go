@@ -13,7 +13,11 @@ import (
 )
 
 // imageRefRe validates OCI image references: registry/repo:tag or registry/repo@sha256:digest.
-var imageRefRe = regexp.MustCompile(`^[a-z0-9]+([._/:@-][a-z0-9]+)*([:.][a-zA-Z0-9._-]+)?(@sha256:[a-f0-9]{64})?$`)
+// The domain portion (before the first /) allows uppercase (DNS is case-insensitive).
+// Path components (after /) are lowercase per the OCI Distribution Spec, with separators
+// matching the OCI grammar: single [._], double [__], or one-or-more [-].
+// Tags (after :) allow mixed case.
+var imageRefRe = regexp.MustCompile(`^[a-zA-Z0-9]+([._-][a-zA-Z0-9]+)*(:[0-9]+)?(/[a-z0-9]+([._]{1,2}|-+)[a-z0-9]+|/[a-z0-9]+)*(:[a-zA-Z0-9._-]+)?(@sha256:[a-f0-9]{64})?$`)
 
 var (
 	// ConfigFlags holds standard kubectl-style kubeconfig/context/namespace flags.

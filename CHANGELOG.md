@@ -2,6 +2,26 @@
 
 All notable changes to kdiag are documented in this file.
 
+## [0.5.1] - 2026-04-09
+
+### Fixed
+- BPF capture filter split into separate arguments for tcpdump (multi-word filters like `tcp and port 443` now work)
+- `diagnose` reports error instead of silently omitting refs/ingress checks when pod fetch fails
+- `diagnose` refs check reports non-NotFound errors (RBAC/timeout) instead of silently counting them as verified
+- `diagnose` and `health` commands use 3x base timeout to prevent deadline exceeded on large clusters
+- `--protocol` flag no longer silently overridden by service port auto-detection in `connectivity`
+- Image validation regex updated to match OCI Distribution Spec (uppercase domains, double separators in paths)
+- Signal handler goroutine leak in `logs` command on normal exit
+- Multi-pod log output no longer interleaves mid-line (shared mutex across writers)
+- `DescribeInstanceTypes` batched in chunks of 100 with input deduplication
+- Ephemeral debug containers use bounded `sleep 3600` instead of `sleep infinity`
+- Shell pre-flight API calls bounded with timeout context (previously hung on unreachable API server)
+- Node debug pod name truncation preserves random suffix for uniqueness
+- Capture context creation simplified to single if/else (no double defer cancel)
+
+### Changed
+- Node debug pod ActiveDeadlineSeconds set to 2 hours (safety net for orphaned pods after crash/disconnect)
+
 ## [0.5.0] - 2026-03-12
 
 ### Added

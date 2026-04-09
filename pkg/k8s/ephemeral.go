@@ -141,12 +141,13 @@ func RunInEphemeralContainer(ctx context.Context, client *Client, opts Ephemeral
 		return fmt.Errorf("insufficient permissions to use ephemeral containers\n\n%s", msg)
 	}
 
-	// Step 2: Create ephemeral container (sleep keeps it alive for exec).
+	// Step 2: Create ephemeral container. A bounded sleep keeps it alive long enough
+	// for the exec, then self-terminates so it does not persist indefinitely in the pod.
 	containerName, err := CreateEphemeralContainer(ctx, client, EphemeralContainerOpts{
 		PodName:         opts.PodName,
 		Namespace:       opts.Namespace,
 		Image:           opts.Image,
-		Command:         []string{"sleep", "infinity"},
+		Command:         []string{"sleep", "3600"},
 		Stdin:           false,
 		TTY:             false,
 		ImagePullSecret: opts.ImagePullSecret,

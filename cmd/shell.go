@@ -67,9 +67,10 @@ func runPodShell(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "[kdiag] fetching pod %s/%s\n", namespace, podName)
 	}
 
-	ctx := context.Background()
+	preflightCtx, preflightCancel := context.WithTimeout(context.Background(), GetTimeout())
+	defer preflightCancel()
 
-	pod, err := client.Clientset.CoreV1().Pods(namespace).Get(ctx, podName, metav1.GetOptions{})
+	pod, err := client.Clientset.CoreV1().Pods(namespace).Get(preflightCtx, podName, metav1.GetOptions{})
 	if err != nil {
 		if errors.IsNotFound(err) {
 			return fmt.Errorf("error: pod %q not found in namespace %q\n\nCheck the pod name with: kubectl get pods -n %s", podName, namespace, namespace)
@@ -80,7 +81,7 @@ func runPodShell(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("error getting pod %q: %w", podName, err)
 	}
 
-	// Warn if Fargate — ephemeral containers may not be supported
+	// Warn if Fargate — ephemeral containers may not be supported.
 	computeType := k8s.DetectComputeType(pod)
 	if IsVerbose() {
 		fmt.Fprintf(os.Stderr, "[kdiag] detected compute type: %s\n", computeType)
@@ -94,7 +95,7 @@ func runPodShell(cmd *cobra.Command, args []string) error {
 	}
 
 	// RBAC pre-flight check
-	checks, err := k8s.CheckEphemeralContainerRBAC(ctx, client.Clientset, namespace)
+	checks, err := k8s.CheckEphemeralContainerRBAC(preflightCtx, client.Clientset, namespace)
 	if err != nil {
 		return fmt.Errorf("error checking RBAC: %w", err)
 	}
@@ -106,7 +107,8 @@ func runPodShell(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "[kdiag] creating ephemeral container in pod %s/%s\n", namespace, podName)
 	}
 
-	// Use timeout context for wait phases; background context for attach
+	// Use timeout context for wait phases; background context for attach.
+	ctx := context.Background()
 	waitCtx, waitCancel := context.WithTimeout(ctx, GetTimeout())
 	defer waitCancel()
 
@@ -174,10 +176,12 @@ func runNodeShell(cmd *cobra.Command, args []string) error {
 	}
 
 	namespace := client.Namespace
-	ctx := context.Background()
+
+	preflightCtx, preflightCancel := context.WithTimeout(context.Background(), GetTimeout())
+	defer preflightCancel()
 
 	// Fetch the node from the API to validate it exists and detect compute type.
-	node, err := client.Clientset.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
+	node, err := client.Clientset.CoreV1().Nodes().Get(preflightCtx, nodeName, metav1.GetOptions{})
 	if err != nil {
 		if errors.IsNotFound(err) {
 			return fmt.Errorf("error: node %q not found in the cluster", nodeName)
@@ -193,11 +197,11 @@ func runNodeShell(cmd *cobra.Command, args []string) error {
 	}
 
 	// RBAC pre-flight: verify user can create pods and attach before attempting to create a privileged debug pod.
-	canCreate, err := k8s.CheckSingleRBAC(ctx, client.Clientset, namespace, "create", "pods", "")
+	canCreate, err := k8s.CheckSingleRBAC(preflightCtx, client.Clientset, namespace, "create", "pods", "")
 	if err != nil {
 		return fmt.Errorf("error checking RBAC: %w", err)
 	}
-	canAttach, err := k8s.CheckSingleRBAC(ctx, client.Clientset, namespace, "create", "pods", "attach")
+	canAttach, err := k8s.CheckSingleRBAC(preflightCtx, client.Clientset, namespace, "create", "pods", "attach")
 	if err != nil {
 		return fmt.Errorf("error checking RBAC: %w", err)
 	}
@@ -216,6 +220,7 @@ func runNodeShell(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "[kdiag] creating node debug pod on node %q\n", nodeName)
 	}
 
+	ctx := context.Background()
 	waitCtx, waitCancel := context.WithTimeout(ctx, GetTimeout())
 	defer waitCancel()
 

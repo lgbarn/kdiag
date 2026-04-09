@@ -60,7 +60,9 @@ func runDiagnose(cmd *cobra.Command, args []string) error {
 	}
 	namespace := client.Namespace
 
-	ctx, cancel := context.WithTimeout(context.Background(), GetTimeout())
+	// Use 3x the base timeout: diagnose runs 8+ sequential API calls including
+	// per-node ENI queries on EKS clusters.
+	ctx, cancel := context.WithTimeout(context.Background(), 3*GetTimeout())
 	defer cancel()
 
 	report := DiagnoseReport{Pod: podName, Namespace: namespace}
@@ -92,6 +94,7 @@ func runDiagnose(cmd *cobra.Command, args []string) error {
 			})
 		} else {
 			var missing, optionalMissing []podRef
+			var lookupErrors int
 			for _, ref := range refs {
 				var getErr error
 				if ref.Kind == "ConfigMap" {
@@ -106,14 +109,28 @@ func runDiagnose(cmd *cobra.Command, args []string) error {
 						} else {
 							missing = append(missing, ref)
 						}
+					} else {
+						lookupErrors++
 					}
 				}
 			}
-			sev, sum := refsSeverity(missing, optionalMissing, len(refs))
-			report.Checks = append(report.Checks, DiagnoseCheckResult{
-				Name: "refs", Severity: sev, Summary: sum,
-			})
+			if lookupErrors > 0 {
+				report.Checks = append(report.Checks, DiagnoseCheckResult{
+					Name: "refs", Severity: SeverityError,
+					Summary: fmt.Sprintf("%d of %d ref lookup(s) failed (RBAC/timeout); results may be incomplete", lookupErrors, len(refs)),
+				})
+			} else {
+				sev, sum := refsSeverity(missing, optionalMissing, len(refs))
+				report.Checks = append(report.Checks, DiagnoseCheckResult{
+					Name: "refs", Severity: sev, Summary: sum,
+				})
+			}
 		}
+	} else {
+		report.Checks = append(report.Checks, DiagnoseCheckResult{
+			Name: "refs", Severity: SeverityError,
+			Summary: "failed to get pod for refs check", Error: sanitizeError(podErr.Error()),
+		})
 	}
 
 	// DNS check: CoreDNS pod health.
@@ -182,6 +199,11 @@ func runDiagnose(cmd *cobra.Command, args []string) error {
 				Name: "ingress", Severity: sev, Summary: sum,
 			})
 		}
+	} else {
+		report.Checks = append(report.Checks, DiagnoseCheckResult{
+			Name: "ingress", Severity: SeverityError,
+			Summary: "failed to get pod for ingress check", Error: sanitizeError(podErr.Error()),
+		})
 	}
 
 	// EKS-specific checks.

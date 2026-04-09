@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -152,13 +153,14 @@ func runCapture(cmd *cobra.Command, args []string) error {
 	}
 
 	// Set up context with optional duration timeout and SIGINT handler.
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
+	var ctx context.Context
+	var cancel context.CancelFunc
 	if captureDuration > 0 {
-		ctx, cancel = context.WithTimeout(ctx, captureDuration)
-		defer cancel()
+		ctx, cancel = context.WithTimeout(context.Background(), captureDuration)
+	} else {
+		ctx, cancel = context.WithCancel(context.Background())
 	}
+	defer cancel()
 
 	interrupted := make(chan struct{})
 	sigCh := make(chan os.Signal, 1)
@@ -266,6 +268,8 @@ func runCapture(cmd *cobra.Command, args []string) error {
 
 // buildTcpdumpCommand builds a tcpdump argv. When pcapToStdout is true, output
 // is raw pcap on stdout (for piping to a file); otherwise line-buffered text.
+// The BPF filter is split into separate arguments because tcpdump expects filter
+// tokens as trailing positional arguments (e.g. "tcp", "and", "port", "80").
 func buildTcpdumpCommand(iface string, count int, filter string, pcapToStdout bool) []string {
 	cmd := []string{"tcpdump", "-i", iface}
 	if pcapToStdout {
@@ -277,13 +281,14 @@ func buildTcpdumpCommand(iface string, count int, filter string, pcapToStdout bo
 		cmd = append(cmd, "-c", strconv.Itoa(count))
 	}
 	if filter != "" {
-		cmd = append(cmd, filter)
+		cmd = append(cmd, strings.Fields(filter)...)
 	}
 	return cmd
 }
 
 // buildTsharkCommand builds a tshark argv for structured output.
 // format must be "ek" (JSON-lines, one object per packet) or "json" (JSON array).
+// Unlike tcpdump, tshark accepts the entire BPF filter as a single -f argument.
 func buildTsharkCommand(iface, format string, count int, filter string) []string {
 	cmd := []string{"tshark", "-i", iface, "-T", format, "-l"}
 	if count > 0 {
